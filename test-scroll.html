@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>滚动测试</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: Consolas, monospace;
+            height: 100vh;
+            overflow: hidden;
+            background: #1e1e1e;
+            color: #c9d1d9;
+        }
+        
+        .main-content {
+            height: 100%;
+            overflow-y: auto !important;
+            padding: 20px;
+            background: #252526;
+        }
+        
+        .content {
+            line-height: 1.6;
+            padding-bottom: 100px;
+        }
+    </style>
+</head>
+<body>
+    <div class="main-content" id="mainContent">
+        <div class="content" id="content">
+            <p>这是第一行</p>
+            <p>这是第二行</p>
+            <p>这是第三行</p>
+        </div>
+    </div>
+    
+    <script>
+        // 生成测试内容
+        const content = document.getElementById('content');
+        let html = '';
+        for (let i = 1; i <= 100; i++) {
+            html += `<p>这是第 ${i} 行内容 - 测试滚动功能是否正常工作</p>`;
+        }
+        content.innerHTML = html;
+        
+        // 监听滚动
+        const mainContent = document.getElementById('mainContent');
+        mainContent.addEventListener('wheel', (e) => {
+            console.log('wheel event:', e.deltaY);
+        }, { passive: true });
+        
+        mainContent.addEventListener('scroll', () => {
+            const scrollTop = mainContent.scrollTop;
+            const scrollHeight = mainContent.scrollHeight;
+            const clientHeight = mainContent.clientHeight;
+            console.log('scroll:', { scrollTop, scrollHeight, clientHeight });
+        });
+    </script>
+</body>
+</html>

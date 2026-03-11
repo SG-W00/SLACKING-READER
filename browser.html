@@ -1,0 +1,718 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>摸鱼阅读器</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden;
+            height: 100vh;
+        }
+        
+        .background {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #e0e5ec;
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+            z-index: -1;
+            transition: all 0.3s ease;
+        }
+        
+        .app-container {
+            width: 100%;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 20px;
+            background: rgba(255, 255, 255, 0.95);
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        
+        .header h1 {
+            font-size: 24px;
+            color: #333;
+        }
+        
+        .icon-btn {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            padding: 8px;
+            border-radius: 8px;
+            transition: all 0.2s;
+        }
+        
+        .icon-btn:hover {
+            background: rgba(0, 0, 0, 0.05);
+        }
+        
+        .main-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            background: rgba(255, 255, 255, 0.9);
+            margin: 10px 20px 20px 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+        }
+        
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: #666;
+        }
+        
+        .empty-icon {
+            font-size: 80px;
+            margin-bottom: 20px;
+        }
+        
+        .empty-state p {
+            font-size: 18px;
+            margin-bottom: 30px;
+        }
+        
+        .primary-btn {
+            padding: 12px 30px;
+            font-size: 16px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 25px;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        .primary-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+        }
+        
+        .reader {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px 0;
+        }
+        
+        .chapter-nav {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #eee;
+        }
+        
+        .nav-btn {
+            padding: 10px 20px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        
+        .nav-btn:hover {
+            background: #5568d3;
+        }
+        
+        .nav-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        
+        .chapter-title {
+            font-size: 20px;
+            font-weight: bold;
+            color: #333;
+        }
+        
+        .content {
+            line-height: 1.8;
+            color: #333;
+            font-size: 16px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        
+        .page-info {
+            text-align: center;
+            margin-top: 30px;
+            padding-top: 15px;
+            border-top: 2px solid #eee;
+            color: #999;
+        }
+        
+        .settings-panel {
+            position: fixed;
+            top: 0;
+            right: -400px;
+            width: 350px;
+            height: 100%;
+            background: white;
+            box-shadow: -5px 0 30px rgba(0, 0, 0, 0.2);
+            z-index: 1000;
+            transition: right 0.3s ease;
+            overflow-y: auto;
+        }
+        
+        .settings-panel.active {
+            right: 0;
+        }
+        
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px;
+            border-bottom: 2px solid #eee;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        
+        .panel-header h2 {
+            font-size: 20px;
+        }
+        
+        .close-btn {
+            background: none;
+            border: none;
+            font-size: 32px;
+            color: white;
+            cursor: pointer;
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            transition: background 0.2s;
+        }
+        
+        .close-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+        
+        .panel-content {
+            padding: 20px;
+        }
+        
+        .setting-group {
+            margin-bottom: 30px;
+        }
+        
+        .setting-group h3 {
+            font-size: 16px;
+            color: #666;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .setting-item {
+            margin-bottom: 15px;
+        }
+        
+        .setting-item label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 14px;
+            color: #333;
+        }
+        
+        .setting-item input[type="range"] {
+            width: 100%;
+            cursor: pointer;
+        }
+        
+        .setting-item input[type="color"] {
+            width: 100px;
+            height: 35px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        
+        .setting-item input[type="file"] {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        
+        .overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 999;
+            display: none;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        
+        .overlay.active {
+            display: block;
+            opacity: 1;
+        }
+        
+        .reset-btn {
+            width: 100%;
+            padding: 12px;
+            font-size: 14px;
+            background: #f44336;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        
+        .reset-btn:hover {
+            background: #d32f2f;
+        }
+        
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+        
+        ::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 4px;
+        }
+        
+        ::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+    </style>
+</head>
+<body>
+    <div class="background" id="background"></div>
+    
+    <div class="app-container">
+        <header class="header">
+            <h1>📚 摸鱼阅读器</h1>
+            <button class="icon-btn" id="settingsBtn" title="设置">⚙️</button>
+        </header>
+        
+        <div class="main-content">
+            <div class="empty-state" id="emptyState">
+                <div class="empty-icon">📖</div>
+                <p>点击下方按钮导入小说</p>
+                <button class="primary-btn" id="importBtn">📁 导入小说</button>
+            </div>
+            
+            <div class="reader" id="reader" style="display: none;">
+                <div class="chapter-nav">
+                    <button class="nav-btn" id="prevChapterBtn">◀ 上一章</button>
+                    <span class="chapter-title" id="chapterTitle">第一章</span>
+                    <button class="nav-btn" id="nextChapterBtn">下一章 ▶</button>
+                </div>
+                <div class="content" id="content"></div>
+                <div class="page-info">
+                    <span id="chapterInfo">1 / 1</span>
+                </div>
+            </div>
+        </div>
+        
+        <input type="file" id="fileInput" accept=".txt" style="display: none;">
+    </div>
+    
+    <div class="settings-panel" id="settingsPanel">
+        <div class="panel-header">
+            <h2>⚙️ 阅读设置</h2>
+            <button class="close-btn" id="closeSettingsBtn">×</button>
+        </div>
+        
+        <div class="panel-content">
+            <div class="setting-group">
+                <h3>🖼️ 背景设置</h3>
+                <div class="setting-item">
+                    <label>背景图片:</label>
+                    <input type="file" id="bgInput" accept="image/*">
+                </div>
+                <div class="setting-item">
+                    <label>背景缩放: <span id="scaleValue">100%</span></label>
+                    <input type="range" id="bgScale" min="50" max="200" value="100">
+                </div>
+                <div class="setting-item">
+                    <label>背景虚化: <span id="blurValue">0px</span></label>
+                    <input type="range" id="bgBlur" min="0" max="20" value="0">
+                </div>
+            </div>
+            
+            <div class="setting-group">
+                <h3>📝 文字设置</h3>
+                <div class="setting-item">
+                    <label>字体大小: <span id="fontSizeValue">16px</span></label>
+                    <input type="range" id="fontSize" min="12" max="32" value="16">
+                </div>
+                <div class="setting-item">
+                    <label>文字颜色:</label>
+                    <input type="color" id="textColor" value="#333333">
+                </div>
+                <div class="setting-item">
+                    <label>行高: <span id="lineHeightValue">1.8</span></label>
+                    <input type="range" id="lineHeight" min="1.2" max="2.5" step="0.1" value="1.8">
+                </div>
+            </div>
+            
+            <div class="setting-group">
+                <h3>🎨 主题颜色</h3>
+                <div class="setting-item">
+                    <label>背景颜色:</label>
+                    <input type="color" id="bgColor" value="#f5f5f5">
+                </div>
+            </div>
+            
+            <div class="setting-group">
+                <button class="reset-btn" id="resetBtn">🔄 重置设置</button>
+            </div>
+        </div>
+    </div>
+    
+    <div class="overlay" id="overlay"></div>
+    
+    <script>
+        let chapters = [];
+        let currentChapterIndex = 0;
+        let settings = {
+            bgImage: null,
+            bgScale: 100,
+            bgBlur: 0,
+            fontSize: 16,
+            textColor: '#333333',
+            lineHeight: 1.8,
+            bgColor: '#f5f5f5'
+        };
+
+        const background = document.getElementById('background');
+        const settingsBtn = document.getElementById('settingsBtn');
+        const settingsPanel = document.getElementById('settingsPanel');
+        const closeSettingsBtn = document.getElementById('closeSettingsBtn');
+        const overlay = document.getElementById('overlay');
+        const importBtn = document.getElementById('importBtn');
+        const fileInput = document.getElementById('fileInput');
+        const bgInput = document.getElementById('bgInput');
+        const emptyState = document.getElementById('emptyState');
+        const reader = document.getElementById('reader');
+        const content = document.getElementById('content');
+        const chapterTitle = document.getElementById('chapterTitle');
+        const prevChapterBtn = document.getElementById('prevChapterBtn');
+        const nextChapterBtn = document.getElementById('nextChapterBtn');
+        const chapterInfo = document.getElementById('chapterInfo');
+
+        const bgScaleInput = document.getElementById('bgScale');
+        const bgBlurInput = document.getElementById('bgBlur');
+        const fontSizeInput = document.getElementById('fontSize');
+        const textColorInput = document.getElementById('textColor');
+        const lineHeightInput = document.getElementById('lineHeight');
+        const bgColorInput = document.getElementById('bgColor');
+        const resetBtn = document.getElementById('resetBtn');
+
+        function init() {
+            loadSettings();
+            applySettings();
+            bindEvents();
+        }
+
+        function bindEvents() {
+            settingsBtn.addEventListener('click', () => {
+                settingsPanel.classList.add('active');
+                overlay.classList.add('active');
+            });
+            
+            closeSettingsBtn.addEventListener('click', () => {
+                settingsPanel.classList.remove('active');
+                overlay.classList.remove('active');
+            });
+            
+            overlay.addEventListener('click', () => {
+                settingsPanel.classList.remove('active');
+                overlay.classList.remove('active');
+            });
+            
+            importBtn.addEventListener('click', () => {
+                fileInput.click();
+            });
+            
+            fileInput.addEventListener('change', handleFileImport);
+            bgInput.addEventListener('change', handleBgImport);
+            
+            prevChapterBtn.addEventListener('click', () => {
+                if (currentChapterIndex > 0) {
+                    currentChapterIndex--;
+                    renderChapter();
+                }
+            });
+            
+            nextChapterBtn.addEventListener('click', () => {
+                if (currentChapterIndex < chapters.length - 1) {
+                    currentChapterIndex++;
+                    renderChapter();
+                }
+            });
+            
+            bgScaleInput.addEventListener('input', (e) => {
+                settings.bgScale = e.target.value;
+                document.getElementById('scaleValue').textContent = settings.bgScale + '%';
+                applySettings();
+                saveSettings();
+            });
+            
+            bgBlurInput.addEventListener('input', (e) => {
+                settings.bgBlur = e.target.value;
+                document.getElementById('blurValue').textContent = settings.bgBlur + 'px';
+                applySettings();
+                saveSettings();
+            });
+            
+            fontSizeInput.addEventListener('input', (e) => {
+                settings.fontSize = e.target.value;
+                document.getElementById('fontSizeValue').textContent = settings.fontSize + 'px';
+                applySettings();
+                saveSettings();
+            });
+            
+            textColorInput.addEventListener('input', (e) => {
+                settings.textColor = e.target.value;
+                applySettings();
+                saveSettings();
+            });
+            
+            lineHeightInput.addEventListener('input', (e) => {
+                settings.lineHeight = e.target.value;
+                document.getElementById('lineHeightValue').textContent = settings.lineHeight;
+                applySettings();
+                saveSettings();
+            });
+            
+            bgColorInput.addEventListener('input', (e) => {
+                settings.bgColor = e.target.value;
+                applySettings();
+                saveSettings();
+            });
+            
+            resetBtn.addEventListener('click', () => {
+                if (confirm('确定要重置所有设置吗？')) {
+                    settings = {
+                        bgImage: null,
+                        bgScale: 100,
+                        bgBlur: 0,
+                        fontSize: 16,
+                        textColor: '#333333',
+                        lineHeight: 1.8,
+                        bgColor: '#f5f5f5'
+                    };
+                    bgScaleInput.value = 100;
+                    document.getElementById('scaleValue').textContent = '100%';
+                    bgBlurInput.value = 0;
+                    document.getElementById('blurValue').textContent = '0px';
+                    fontSizeInput.value = 16;
+                    document.getElementById('fontSizeValue').textContent = '16px';
+                    textColorInput.value = '#333333';
+                    lineHeightInput.value = 1.8;
+                    document.getElementById('lineHeightValue').textContent = '1.8';
+                    bgColorInput.value = '#f5f5f5';
+                    applySettings();
+                    saveSettings();
+                }
+            });
+            
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'ArrowLeft' && chapters.length > 0) {
+                    prevChapterBtn.click();
+                } else if (e.key === 'ArrowRight' && chapters.length > 0) {
+                    nextChapterBtn.click();
+                } else if (e.key === 'Escape') {
+                    settingsPanel.classList.remove('active');
+                    overlay.classList.remove('active');
+                }
+            });
+        }
+
+        function handleFileImport(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const text = event.target.result;
+                parseNovel(text);
+            };
+            reader.readAsText(file, 'UTF-8');
+        }
+
+        function handleBgImport(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                settings.bgImage = event.target.result;
+                applySettings();
+                saveSettings();
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function parseNovel(text) {
+            chapters = [];
+            currentChapterIndex = 0;
+            
+            const chapterPatterns = [
+                /第[0-9零一二三四五六七八九十百千万]+章/g,
+                /第[0-9零一二三四五六七八九十百千万]+节/g,
+                /Chapter\s+\d+/gi
+            ];
+            
+            let foundChapters = false;
+            
+            let matches = text.split(chapterPatterns[0]);
+            if (matches.length > 1) {
+                const titles = text.match(chapterPatterns[0]);
+                for (let i = 0; i < matches.length; i++) {
+                    if (matches[i].trim()) {
+                        chapters.push({
+                            title: titles && titles[i] ? titles[i] : `第${i + 1}部分`,
+                            content: matches[i].trim()
+                        });
+                    }
+                }
+                foundChapters = true;
+            }
+            
+            if (!foundChapters) {
+                matches = text.split(chapterPatterns[1]);
+                if (matches.length > 1) {
+                    const titles = text.match(chapterPatterns[1]);
+                    chapters = [];
+                    for (let i = 0; i < matches.length; i++) {
+                        if (matches[i].trim()) {
+                            chapters.push({
+                                title: titles && titles[i] ? titles[i] : `第${i + 1}部分`,
+                                content: matches[i].trim()
+                            });
+                        }
+                    }
+                    foundChapters = true;
+                }
+            }
+            
+            if (!foundChapters) {
+                const paragraphs = text.split(/\n\n\n+/);
+                const chunkSize = 5;
+                
+                for (let i = 0; i < paragraphs.length; i += chunkSize) {
+                    const chunk = paragraphs.slice(i, i + chunkSize).join('\n\n');
+                    if (chunk.trim()) {
+                        chapters.push({
+                            title: `第${Math.floor(i / chunkSize) + 1}部分`,
+                            content: chunk.trim()
+                        });
+                    }
+                }
+            }
+            
+            if (chapters.length === 0) {
+                chapters.push({
+                    title: '全文',
+                    content: text.trim()
+                });
+            }
+            
+            emptyState.style.display = 'none';
+            reader.style.display = 'block';
+            
+            renderChapter();
+        }
+
+        function renderChapter() {
+            const chapter = chapters[currentChapterIndex];
+            if (!chapter) return;
+            
+            chapterTitle.textContent = chapter.title;
+            content.textContent = chapter.content;
+            chapterInfo.textContent = `${currentChapterIndex + 1} / ${chapters.length}`;
+            
+            prevChapterBtn.disabled = currentChapterIndex === 0;
+            nextChapterBtn.disabled = currentChapterIndex === chapters.length - 1;
+            
+            document.querySelector('.main-content').scrollTop = 0;
+        }
+
+        function applySettings() {
+            if (settings.bgImage) {
+                background.style.backgroundImage = `url(${settings.bgImage})`;
+            }
+            background.style.backgroundSize = `${settings.bgScale}% auto`;
+            background.style.filter = `blur(${settings.bgBlur}px)`;
+            
+            content.style.fontSize = settings.fontSize + 'px';
+            content.style.color = settings.textColor;
+            content.style.lineHeight = settings.lineHeight;
+            
+            document.querySelector('.main-content').style.background = settings.bgColor;
+        }
+
+        function saveSettings() {
+            localStorage.setItem('novelReaderSettings', JSON.stringify(settings));
+        }
+
+        function loadSettings() {
+            const saved = localStorage.getItem('novelReaderSettings');
+            if (saved) {
+                try {
+                    const loaded = JSON.parse(saved);
+                    settings = { ...settings, ...loaded };
+                    
+                    bgScaleInput.value = settings.bgScale;
+                    document.getElementById('scaleValue').textContent = settings.bgScale + '%';
+                    bgBlurInput.value = settings.bgBlur;
+                    document.getElementById('blurValue').textContent = settings.bgBlur + 'px';
+                    fontSizeInput.value = settings.fontSize;
+                    document.getElementById('fontSizeValue').textContent = settings.fontSize + 'px';
+                    textColorInput.value = settings.textColor;
+                    lineHeightInput.value = settings.lineHeight;
+                    document.getElementById('lineHeightValue').textContent = settings.lineHeight;
+                    bgColorInput.value = settings.bgColor;
+                } catch (e) {
+                    console.error('加载设置失败:', e);
+                }
+            }
+        }
+
+        init();
+    </script>
+</body>
+</html>

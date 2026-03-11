@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>摸鱼阅读器</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- 自定义标题栏 -->
+    <div class="title-bar" id="titleBar">
+        <div class="title-drag-area" id="dragArea">
+            <span class="app-title"></span>
+        </div>
+        <div class="window-controls">
+            <button class="control-btn minimize-btn" id="minimizeBtn" title="最小化">_</button>
+            <button class="control-btn close-btn" id="closeBtn" title="关闭">×</button>
+        </div>
+    </div>
+    
+    <div class="app-container">
+        <div class="toolbar" id="toolbar">
+            <button class="toolbar-btn hidden-btn" id="importBtn" title="导入小说">+</button>
+            <button class="toolbar-btn hidden-btn" id="backToShelfBtn" title="返回书架">←</button>
+            <button class="toolbar-btn hidden-btn" id="prevChapterBtn" title="上一章">&lt;</button>
+            <select class="chapter-select toolbar-chapter-select" id="chapterSelect"></select>
+            <button class="toolbar-btn hidden-btn" id="nextChapterBtn" title="下一章">&gt;</button>
+            <button class="toolbar-btn hidden-btn" id="settingsBtn" title="设置">≡</button>
+            <button class="toolbar-btn hidden-btn" id="pinBtn" title="置顶">◉</button>
+        </div>
+        
+        <div class="main-content" id="mainContent">
+            <!-- 空状态/书架列表 -->
+            <div class="empty-state" id="emptyState">
+                <div class="empty-icon">/* */</div>
+                <p>按 + 号导入代码文件</p>
+                <p class="hint">支持 .txt 格式</p>
+            </div>
+
+            <!-- 书架列表 -->
+            <div class="bookshelf" id="bookshelf" style="display: none;">
+                <div class="bookshelf-header">
+                    <h2>/* Bookshelf */</h2>
+                </div>
+                <div class="book-list" id="bookList"></div>
+            </div>
+
+            <!-- 阅读器 -->
+            <div class="reader" id="reader" style="display: none;">
+                <div class="content" id="content"></div>
+                <div class="page-info" id="pageInfo">
+                    <span id="chapterInfo">1 / 1</span>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="settings-panel" id="settingsPanel">
+        <div class="panel-header">
+            <h2>/* Settings */</h2>
+            <button class="close-panel-btn" id="closeSettingsBtn">×</button>
+        </div>
+        
+        <div class="panel-content">
+            <div class="setting-group">
+                <h3>// Window Settings</h3>
+                <div class="setting-item">
+                    <label>Opacity: <span id="opacityValue">100%</span></label>
+                    <input type="range" id="windowOpacity" min="30" max="100" value="100">
+                </div>
+                <div class="setting-item">
+                    <label>Transparent Mode</label>
+                    <label class="switch">
+                        <input type="checkbox" id="transparentMode">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+            </div>
+            
+            <div class="setting-group">
+                <h3>// Text Settings</h3>
+                <div class="setting-item">
+                    <label>Font Size: <span id="fontSizeValue">14px</span></label>
+                    <input type="range" id="fontSize" min="11" max="20" value="14">
+                </div>
+                <div class="setting-item">
+                    <label>Text Color:</label>
+                    <input type="color" id="textColor" value="#858585">
+                </div>
+                <div class="setting-item">
+                    <label>Line Height: <span id="lineHeightValue">1.6</span></label>
+                    <input type="range" id="lineHeight" min="1.4" max="2.0" step="0.1" value="1.6">
+                </div>
+            </div>
+            
+            <div class="setting-group">
+                <h3>// Background</h3>
+                <div class="setting-item">
+                    <label>Background Color:</label>
+                    <input type="color" id="bgColor" value="#1e1e1e">
+                </div>
+                <div class="setting-item">
+                    <label>Content Opacity: <span id="contentOpacityValue">95%</span></label>
+                    <input type="range" id="contentOpacity" min="70" max="100" value="95">
+                </div>
+            </div>
+            
+            <div class="setting-group">
+                <button class="reset-btn" id="resetBtn">Reset</button>
+            </div>
+        </div>
+    </div>
+    
+    <input type="file" id="fileInput" accept=".txt" style="display: none;">
+    
+    <script src="app.js"></script>
+</body>
+</html>

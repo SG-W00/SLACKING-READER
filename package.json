@@ -1,0 +1,28 @@
+{
+  "name": "moyu-reader",
+  "version": "1.0.0",
+  "description": "摸鱼阅读器 - 可悬浮在IDE上的小说阅读器",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build-win": "electron-builder --win"
+  },
+  "keywords": ["reader", "novel", "electron"],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.1"
+  },
+  "build": {
+    "appId": "com.moyu.reader",
+    "productName": "摸鱼阅读器",
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "icon.ico"
+    }
+  }
+}
