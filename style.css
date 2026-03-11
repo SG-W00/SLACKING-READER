@@ -418,6 +418,41 @@ body {
     background: transparent !important;
 }
 
+/* 章节内容样式 */
+.chapter-content {
+    margin-bottom: 50px;
+    padding-bottom: 30px;
+    border-bottom: 1px solid #3e3e3e;
+}
+
+.chapter-content:last-child {
+    border-bottom: none;
+}
+
+.chapter-content .chapter-title {
+    font-size: 14px;
+    font-weight: normal;
+    color: #e6edf3;
+    font-family: 'Consolas', monospace;
+    margin-bottom: 20px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #4e4e4e;
+    display: block;
+}
+
+.chapter-text {
+    color: #858585;
+    line-height: 1.6;
+}
+
+.chapter-text .paragraph {
+    margin-bottom: 12px;
+    text-indent: 2em;
+    line-height: 1.8;
+    font-size: 14px;
+    color: #858585;
+}
+
 .page-info {
     display: flex;
     justify-content: center;
