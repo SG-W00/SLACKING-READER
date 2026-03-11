@@ -620,7 +620,7 @@ function openBook(bookId) {
 
     // 恢复阅读进度
     const progress = readingProgress[bookId];
-    if (progress) {
+    if (progress && progress.chapterIndex !== undefined) {
         currentChapterIndex = Math.min(progress.chapterIndex, chapters.length - 1);
         console.log('恢复阅读进度 - 章节:', currentChapterIndex, '滚动位置:', progress.scrollPosition);
     } else {
@@ -648,19 +648,28 @@ function openBook(bookId) {
         nextChapterBtn.style.display = 'block';
     }
 
-    renderChapter();
+    renderChapter(false); // 不自动滚动,由 openBook 控制滚动位置
     setupScrollListener();
     scrollCheckEnabled = true;
 
-    // 恢复滚动位置(使用章节索引而不是绝对位置)
-    if (progress && progress.chapterIndex !== undefined) {
+    // 恢复滚动位置
+    if (progress && progress.scrollPosition !== undefined) {
         setTimeout(() => {
-            // 重新渲染到进度所在的章节
-            if (progress.chapterIndex >= 0 && progress.chapterIndex < chapters.length) {
-                currentChapterIndex = progress.chapterIndex;
-                renderChapter();
+            mainContent.scrollTop = progress.scrollPosition;
+            console.log('恢复滚动位置:', progress.scrollPosition);
+        }, 150);
+    } else {
+        // 如果没有进度,滚动到当前章节的默认位置
+        setTimeout(() => {
+            const chapterElements = content.querySelectorAll('.chapter-content');
+            if (currentChapterIndex > 0 && chapterElements.length > 0) {
+                const prevChapterEl = chapterElements[0];
+                mainContent.scrollTop = prevChapterEl.scrollHeight;
+            } else {
+                mainContent.scrollTop = 0;
             }
-        }, 100);
+            updateChapterTitle();
+        }, 150);
     }
 
     // 启动自动保存进度定时器（每30秒保存一次）
@@ -726,51 +735,110 @@ function loadReadingProgress() {
 let scrollTimeout = null;
 let scrollCheckEnabled = false;
 let isRenderingChapter = false;
-let currentBookScrollTop = 0; // 整本书的滚动位置
-let chapterOffsets = []; // 每个章节在整本书中的偏移量
+let loadedChapters = new Set(); // 记录已加载的章节索引
 
 function setupScrollListener() {
     if (!mainContent) return;
 
-    // 滚动事件 - 根据滚动位置动态加载章节
+    // 滚动事件 - 根据滚动位置更新当前章节
     mainContent.addEventListener('scroll', () => {
         if (!scrollCheckEnabled || isRenderingChapter) return;
 
         clearTimeout(scrollTimeout);
         scrollTimeout = setTimeout(() => {
-            handleScroll();
+            updateCurrentChapterByScroll();
             saveReadingProgress();
         }, 100);
     });
 }
 
-// 处理滚动事件 - 动态加载章节
-function handleScroll() {
-    if (!mainContent || isRenderingChapter) return;
+// 根据滚动位置更新当前章节
+function updateCurrentChapterByScroll() {
+    if (!mainContent || !content) return;
 
     const scrollTop = mainContent.scrollTop;
+    const chapterElements = content.querySelectorAll('.chapter-content');
+
+    // 找到当前滚动位置所在的DOM章节元素
+    let foundElementIndex = -1;
+    let offsetSum = 0;
+
+    for (let i = 0; i < chapterElements.length; i++) {
+        const chapterEl = chapterElements[i];
+        const chapterHeight = chapterEl.scrollHeight;
+
+        if (scrollTop >= offsetSum && scrollTop < offsetSum + chapterHeight) {
+            // 找到当前章节元素
+            foundElementIndex = i;
+            break;
+        }
+
+        offsetSum += chapterHeight;
+    }
+
+    // 如果滚动到最后一个章节元素
+    if (foundElementIndex === -1 && chapterElements.length > 0) {
+        foundElementIndex = chapterElements.length - 1;
+    }
+
+    // 从DOM元素的 data-chapter-index 属性获取实际章节索引
+    let actualChapterIndex = -1;
+    if (foundElementIndex >= 0 && chapterElements[foundElementIndex]) {
+        actualChapterIndex = parseInt(chapterElements[foundElementIndex].dataset.chapterIndex);
+    }
+
+    // 调试信息
+    console.log('滚动检测 - scrollTop:', scrollTop, 'foundElementIndex:', foundElementIndex,
+                'actualChapterIndex:', actualChapterIndex, 'currentChapterIndex:', currentChapterIndex);
+
+    // 检查是否需要加载更多章节
     const scrollHeight = mainContent.scrollHeight;
     const clientHeight = mainContent.clientHeight;
 
-    // 检查是否滚动到顶部附近,需要加载上一章
-    if (scrollTop < 100 && currentChapterIndex > 0) {
+    // 获取当前DOM中最小和最大的章节索引
+    const chapterIndexes = Array.from(chapterElements).map(el => parseInt(el.dataset.chapterIndex));
+    const minChapterIndex = Math.min(...chapterIndexes);
+    const maxChapterIndex = Math.max(...chapterIndexes);
+
+    console.log('DOM章节范围:', minChapterIndex, '到', maxChapterIndex);
+
+    // 滚动到顶部附近,需要加载上一章
+    if (scrollTop < 100 && minChapterIndex > 0) {
         loadPrevChapter();
     }
-    // 检查是否滚动到底部附近,需要加载下一章
-    else if (scrollHeight - scrollTop - clientHeight < 200) {
-        if (currentChapterIndex < chapters.length - 1) {
-            loadNextChapter();
-        }
+    // 滚动到底部附近,需要加载下一章
+    else if (scrollHeight - scrollTop - clientHeight < 200 && maxChapterIndex < chapters.length - 1) {
+        loadNextChapter();
     }
 
     // 更新当前章节索引
-    updateCurrentChapterIndex();
+    if (actualChapterIndex >= 0 && actualChapterIndex < chapters.length && actualChapterIndex !== currentChapterIndex) {
+        currentChapterIndex = actualChapterIndex;
+        updateChapterTitle();
+        updateChapterSelect();
+        console.log('✅ 当前章节更新为:', currentChapterIndex + 1, chapters[currentChapterIndex].title);
+    }
 }
 
 // 加载上一章并插入到当前内容之前
 function loadPrevChapter() {
+    // 获取当前DOM中最小的章节索引
+    const chapterElements = content.querySelectorAll('.chapter-content');
+    const chapterIndexes = Array.from(chapterElements).map(el => parseInt(el.dataset.chapterIndex));
+    const minChapterIndex = Math.min(...chapterIndexes);
+
+    // 加载最小索引的前一章
+    const prevIndex = minChapterIndex - 1;
+
+    // 检查是否已经加载过
+    if (prevIndex < 0 || loadedChapters.has(prevIndex) || isRenderingChapter) {
+        console.log('⏭️ 跳过加载上一章 - prevIndex:', prevIndex,
+                    'loadedChapters:', Array.from(loadedChapters),
+                    'isRenderingChapter:', isRenderingChapter);
+        return;
+    }
+
     isRenderingChapter = true;
-    const prevIndex = currentChapterIndex - 1;
     const prevChapter = chapters[prevIndex];
 
     if (!prevChapter) {
@@ -778,15 +846,15 @@ function loadPrevChapter() {
         return;
     }
 
-    console.log('加载上一章:', prevChapter.title);
+    console.log('📖 加载上一章:', prevChapter.title, '索引:', prevIndex);
 
     // 保存当前滚动位置
     const currentScrollTop = mainContent.scrollTop;
-    const currentContent = content.innerHTML;
 
-    // 创建上一章的内容元素
+    // 创建上一章的内容元素,并存储章节索引
     const prevChapterEl = document.createElement('div');
     prevChapterEl.className = 'chapter-content';
+    prevChapterEl.dataset.chapterIndex = prevIndex; // 存储章节索引
     prevChapterEl.innerHTML = `
         <h2 class="chapter-title">${prevChapter.title}</h2>
         <div class="chapter-text">${formatContent(prevChapter.content)}</div>
@@ -795,30 +863,41 @@ function loadPrevChapter() {
     // 将上一章插入到当前内容之前
     content.insertBefore(prevChapterEl, content.firstChild);
 
-    // 更新章节偏移量
-    chapterOffsets[prevIndex] = currentBookScrollTop;
-
-    // 切换到上一章
-    currentChapterIndex = prevIndex;
+    // 标记为已加载
+    loadedChapters.add(prevIndex);
 
     // 恢复滚动位置(加上新插入的内容高度)
     setTimeout(() => {
         const prevHeight = prevChapterEl.scrollHeight;
         mainContent.scrollTop = currentScrollTop + prevHeight;
-        currentBookScrollTop += prevHeight;
 
         updateChapterTitle();
         updateChapterSelect();
 
         isRenderingChapter = false;
-        console.log('上一章加载完成,新滚动位置:', mainContent.scrollTop);
+        console.log('上一章加载完成,章节索引:', prevIndex);
     }, 50);
 }
 
 // 加载下一章并追加到内容之后
 function loadNextChapter() {
+    // 获取当前DOM中最大的章节索引
+    const chapterElements = content.querySelectorAll('.chapter-content');
+    const chapterIndexes = Array.from(chapterElements).map(el => parseInt(el.dataset.chapterIndex));
+    const maxChapterIndex = Math.max(...chapterIndexes);
+
+    // 加载最大索引的后一章
+    const nextIndex = maxChapterIndex + 1;
+
+    // 检查是否已经加载过
+    if (nextIndex >= chapters.length || loadedChapters.has(nextIndex) || isRenderingChapter) {
+        console.log('⏭️ 跳过加载下一章 - nextIndex:', nextIndex,
+                    'loadedChapters:', Array.from(loadedChapters),
+                    'isRenderingChapter:', isRenderingChapter);
+        return;
+    }
+
     isRenderingChapter = true;
-    const nextIndex = currentChapterIndex + 1;
     const nextChapter = chapters[nextIndex];
 
     if (!nextChapter) {
@@ -826,14 +905,15 @@ function loadNextChapter() {
         return;
     }
 
-    console.log('加载下一章:', nextChapter.title);
+    console.log('📖 加载下一章:', nextChapter.title, '索引:', nextIndex);
 
     // 保存当前滚动位置
     const currentScrollTop = mainContent.scrollTop;
 
-    // 创建下一章的内容元素
+    // 创建下一章的内容元素,并存储章节索引
     const nextChapterEl = document.createElement('div');
     nextChapterEl.className = 'chapter-content';
+    nextChapterEl.dataset.chapterIndex = nextIndex; // 存储章节索引
     nextChapterEl.innerHTML = `
         <h2 class="chapter-title">${nextChapter.title}</h2>
         <div class="chapter-text">${formatContent(nextChapter.content)}</div>
@@ -842,11 +922,8 @@ function loadNextChapter() {
     // 将下一章追加到内容之后
     content.appendChild(nextChapterEl);
 
-    // 更新章节偏移量
-    chapterOffsets[nextIndex] = currentBookScrollTop + content.scrollHeight;
-
-    // 切换到下一章
-    currentChapterIndex = nextIndex;
+    // 标记为已加载
+    loadedChapters.add(nextIndex);
 
     // 恢复滚动位置
     setTimeout(() => {
@@ -855,7 +932,7 @@ function loadNextChapter() {
         updateChapterSelect();
 
         isRenderingChapter = false;
-        console.log('下一章加载完成');
+        console.log('下一章加载完成,章节索引:', nextIndex);
     }, 50);
 }
 
@@ -896,7 +973,7 @@ function updateChapterSelect() {
 }
 
 // 渲染章节 - 初始化时加载当前章节及相邻章节
-function renderChapter() {
+function renderChapter(shouldScroll = true) {
     console.log('Rendering chapter:', currentChapterIndex);
     console.log('Chapters array:', chapters);
     console.log('Content element:', content);
@@ -910,56 +987,77 @@ function renderChapter() {
 
     console.log('Chapter content length:', chapter.content?.length || 0);
 
-    // 清空内容
+    // 清空内容和重置状态
     content.innerHTML = '';
-    chapterOffsets = [];
-    currentBookScrollTop = 0;
+    loadedChapters.clear();
+
+    // 构建上一章的内容(如果存在)
+    let prevChapterHeight = 0;
+    if (currentChapterIndex > 0) {
+        const prevChapter = chapters[currentChapterIndex - 1];
+        const prevChapterEl = document.createElement('div');
+        prevChapterEl.className = 'chapter-content';
+        prevChapterEl.dataset.chapterIndex = currentChapterIndex - 1; // 存储章节索引
+        prevChapterEl.innerHTML = `
+            <h2 class="chapter-title">${prevChapter.title}</h2>
+            <div class="chapter-text">${formatContent(prevChapter.content)}</div>
+        `;
+        content.appendChild(prevChapterEl);
+        loadedChapters.add(currentChapterIndex - 1);
+    }
 
     // 构建当前章节的内容
     const chapterEl = document.createElement('div');
     chapterEl.className = 'chapter-content';
+    chapterEl.dataset.chapterIndex = currentChapterIndex; // 存储章节索引
     chapterEl.innerHTML = `
         <h2 class="chapter-title">${chapter.title}</h2>
         <div class="chapter-text">${formatContent(chapter.content)}</div>
     `;
     content.appendChild(chapterEl);
+    loadedChapters.add(currentChapterIndex);
 
     // 预加载下一章(如果存在)
     if (currentChapterIndex < chapters.length - 1) {
         const nextChapter = chapters[currentChapterIndex + 1];
         const nextChapterEl = document.createElement('div');
         nextChapterEl.className = 'chapter-content';
+        nextChapterEl.dataset.chapterIndex = currentChapterIndex + 1; // 存储章节索引
         nextChapterEl.innerHTML = `
             <h2 class="chapter-title">${nextChapter.title}</h2>
             <div class="chapter-text">${formatContent(nextChapter.content)}</div>
         `;
         content.appendChild(nextChapterEl);
-
-        // 记录章节偏移量
-        chapterOffsets[currentChapterIndex + 1] = chapterEl.scrollHeight;
+        loadedChapters.add(currentChapterIndex + 1);
     }
 
-    // 预加载上一章(如果存在)
-    if (currentChapterIndex > 0) {
-        const prevChapter = chapters[currentChapterIndex - 1];
-        const prevChapterEl = document.createElement('div');
-        prevChapterEl.className = 'chapter-content';
-        prevChapterEl.innerHTML = `
-            <h2 class="chapter-title">${prevChapter.title}</h2>
-            <div class="chapter-text">${formatContent(prevChapter.content)}</div>
-        `;
-        content.insertBefore(prevChapterEl, content.firstChild);
-
-        // 更新滚动位置
+    // 只有在需要滚动时才设置默认滚动位置
+    if (shouldScroll) {
         setTimeout(() => {
-            mainContent.scrollTop = prevChapterEl.scrollHeight;
-            chapterOffsets[currentChapterIndex - 1] = 0;
-            chapterOffsets[currentChapterIndex] = prevChapterEl.scrollHeight;
+            const chapterElements = content.querySelectorAll('.chapter-content');
+
+            // 找到当前章节元素的索引(因为有上一章的话,当前章是第二个元素)
+            let currentChapterElementIndex = 0;
+            if (currentChapterIndex > 0) {
+                currentChapterElementIndex = 1;
+                const prevChapterEl = chapterElements[0];
+                prevChapterHeight = prevChapterEl.scrollHeight;
+                mainContent.scrollTop = prevChapterHeight;
+            } else {
+                mainContent.scrollTop = 0;
+            }
+
+            // 更新章节标题和信息
+            updateChapterTitle();
+
+            console.log('滚动到当前章节,位置:', mainContent.scrollTop, '上一章高度:', prevChapterHeight);
+        }, 50);
+    } else {
+        // 不滚动,只更新标题
+        setTimeout(() => {
+            updateChapterTitle();
         }, 50);
     }
-
-    // 更新章节标题和信息
-    updateChapterTitle();
 
     // 更新章节选择器
     if (chapterSelect) {
@@ -974,7 +1072,7 @@ function renderChapter() {
     // 保存阅读进度
     saveReadingProgress();
 
-    console.log('章节渲染完成:', chapter.title);
+    console.log('章节渲染完成,已加载章节:', Array.from(loadedChapters));
 }
 
 // 应用设置
