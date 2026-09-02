@@ -443,9 +443,10 @@ body.unfocused .toolbar {
     opacity: 0 !important;
 }
 
-/* 老板键伪装态：隐藏进度条 */
-body.boss-mode .global-progress {
-    opacity: 0;
+/* 老板键伪装态：隐藏进度条与翻章提示 */
+body.boss-mode .global-progress,
+body.boss-mode .next-hint {
+    opacity: 0 !important;
 }
 
 /* 到底二次滚动翻章提示 */

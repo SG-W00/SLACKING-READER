@@ -15,6 +15,7 @@ let autoSaveInterval = null; // 自动保存定时器
 let renderSeq = 0; // 章节渲染序号，用于丢弃快速切章时的过期响应
 let pendingScroll = null; // 打开书籍后待恢复的滚动位置 { paraIndex, scrollTop }
 let bossModeActive = false; // 老板键伪装态
+let bossReturnScroll = null; // 进入伪装前的阅读位置，退出伪装时恢复
 let atBottomState = false; // 是否处于章节底部（等待二次滚动翻章）
 let bottomWheelAccum = 0; // 底部状态下滚动累积量
 let settings = {
@@ -161,9 +162,10 @@ function bindEvents() {
         bgInput.addEventListener('change', handleBgImport);
     }
     
-    // 章节导航
+    // 章节导航（伪装态下失效，防止章节索引被改）
     if (prevChapterBtn) {
         prevChapterBtn.addEventListener('click', () => {
+            if (bossModeActive) return;
             if (currentChapterIndex > 0) {
                 currentChapterIndex--;
                 renderChapter();
@@ -173,6 +175,7 @@ function bindEvents() {
     
     if (nextChapterBtn) {
         nextChapterBtn.addEventListener('click', () => {
+            if (bossModeActive) return;
             if (currentChapterIndex < chapters.length - 1) {
                 currentChapterIndex++;
                 renderChapter();
@@ -183,6 +186,9 @@ function bindEvents() {
     // 章节选择器
     if (chapterSelect) {
         chapterSelect.addEventListener('change', (e) => {
+            // 伪装态下不切换章节，防止退出伪装后位置错乱
+            if (bossModeActive) return;
+
             log('Chapter select changed:', e.target.value);
             const newIndex = parseInt(e.target.value);
             log('Current index:', currentChapterIndex, 'New index:', newIndex);
@@ -342,11 +348,11 @@ function bindEvents() {
         });
     }
 
-    // 键盘快捷键
+    // 键盘快捷键（伪装态下翻章失效，防止退出伪装后位置错乱）
     document.addEventListener('keydown', (e) => {
-        if (e.key === 'ArrowLeft' && chapters.length > 0) {
+        if (e.key === 'ArrowLeft' && chapters.length > 0 && !bossModeActive) {
             prevChapterBtn.click();
-        } else if (e.key === 'ArrowRight' && chapters.length > 0) {
+        } else if (e.key === 'ArrowRight' && chapters.length > 0 && !bossModeActive) {
             nextChapterBtn.click();
         } else if (e.key === 'Escape') {
             settingsPanel.classList.remove('active');
@@ -732,6 +738,9 @@ function setupScrollListener() {
 
     // 鼠标滚轮事件 - 上滑顶部回上一章；底部二次滚动确认后翻下一章
     mainContent.addEventListener('wheel', (e) => {
+        // 伪装态 / 滚动恢复期完全忽略滚轮，防止章节索引被误改
+        if (!scrollCheckEnabled || bossModeActive || !currentBook) return;
+
         const now = Date.now();
         const timeSinceLastWheel = now - lastWheelEvent;
 
@@ -833,6 +842,17 @@ function updateChapterSelect() {
     chapterSelect.appendChild(frag);
 }
 
+// 程序化滚动定位：绕过 CSS scroll-behavior:smooth 动画。
+// 平滑动画期间 scrollCheckEnabled 恢复后会产生中间 scroll 事件，
+// 导致错误进度被保存、且用户输入会中断动画停在半路
+function scrollToInstant(el, top) {
+    if (!el) return;
+    const prev = el.style.scrollBehavior;
+    el.style.scrollBehavior = 'auto';
+    el.scrollTop = top;
+    el.style.scrollBehavior = prev;
+}
+
 // 按段落渲染章节内容（段落级进度定位依赖段落元素）
 function renderParagraphs(text) {
     content.innerHTML = '';
@@ -895,14 +915,14 @@ async function renderChapter() {
             scrollCheckEnabled = false;
             const paras = content ? content.children : null;
             if (pendingScroll.paraIndex != null && paras && pendingScroll.paraIndex < paras.length) {
-                mainContent.scrollTop = paras[pendingScroll.paraIndex].offsetTop;
+                scrollToInstant(mainContent, paras[pendingScroll.paraIndex].offsetTop);
             } else {
-                mainContent.scrollTop = pendingScroll.scrollTop || 0;
+                scrollToInstant(mainContent, pendingScroll.scrollTop || 0);
             }
             pendingScroll = null;
             setTimeout(() => { scrollCheckEnabled = true; }, 300);
         } else {
-            mainContent.scrollTop = 0;
+            scrollToInstant(mainContent, 0);
             scrollCheckEnabled = true;
         }
     }
@@ -950,8 +970,15 @@ function buildFakeLogLines() {
 function toggleBossMode() {
     bossModeActive = !bossModeActive;
     if (bossModeActive) {
+        // 记录当前阅读位置（段落级优先），退出伪装时精确恢复
+        bossReturnScroll = {
+            paraIndex: getParagraphIndex(),
+            scrollTop: mainContent ? mainContent.scrollTop : 0
+        };
         if (settingsPanel) settingsPanel.classList.remove('active');
         showNextHint(false);
+        // 伪装期间禁用滚动检测，避免误触发翻章/提示
+        scrollCheckEnabled = false;
         document.body.classList.add('boss-mode');
         if (content) {
             content.innerHTML = '';
@@ -964,11 +991,17 @@ function toggleBossMode() {
             });
             content.appendChild(frag);
         }
-        if (mainContent) mainContent.scrollTop = 0;
+        if (mainContent) scrollToInstant(mainContent, 0);
         if (chapterInfo) chapterInfo.textContent = 'build ok';
     } else {
         document.body.classList.remove('boss-mode');
-        renderChapter(); // 重新拉取当前章节，恢复阅读内容
+        // 同一会话窗口尺寸未变，直接用 scrollTop 精确恢复（含段落内偏移）；
+        // paraIndex 仅作为跨会话/窗口尺寸变化时的兜底
+        if (bossReturnScroll) {
+            pendingScroll = { paraIndex: null, scrollTop: bossReturnScroll.scrollTop };
+        }
+        bossReturnScroll = null;
+        renderChapter();
     }
 }
 
