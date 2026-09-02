@@ -59,3 +59,7 @@ Thumbs.db
 .Spotlight-V100
 .Trashes
 ehthumbs.db
+
+# Novel contents: copyrighted, keep out of the repo (example.txt stays)
+txt_source/*
+!txt_source/example.txt

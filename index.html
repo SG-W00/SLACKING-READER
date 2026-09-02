@@ -51,6 +51,10 @@
                 <div class="page-info" id="pageInfo">
                     <span id="chapterInfo">1 / 1</span>
                 </div>
+                <!-- 到底后二次滚动翻章提示 -->
+                <div class="next-hint" id="nextHint">&#9662; scroll for next</div>
+                <!-- 全书进度条（视口底部细线） -->
+                <div class="global-progress"><div class="global-progress-fill" id="globalProgressFill"></div></div>
             </div>
         </div>
     </div>
@@ -102,6 +106,20 @@
                 <div class="setting-item">
                     <label>Content Opacity: <span id="contentOpacityValue">95%</span></label>
                     <input type="range" id="contentOpacity" min="70" max="100" value="95">
+                </div>
+            </div>
+
+            <div class="setting-group">
+                <h3>// Stealth</h3>
+                <div class="setting-item">
+                    <label>Disguise chapter names as file paths</label>
+                    <label class="switch">
+                        <input type="checkbox" id="stealthNames" checked>
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="setting-item">
+                    <label style="color: #6e7681; font-size: 11px;">Boss: right-click / Alt+Q &nbsp;|&nbsp; Next/Prev: Alt+Shift+&rarr;/&larr;</label>
                 </div>
             </div>
             

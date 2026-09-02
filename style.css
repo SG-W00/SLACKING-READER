@@ -418,39 +418,73 @@ body {
     background: transparent !important;
 }
 
-/* 章节内容样式 */
-.chapter-content {
-    margin-bottom: 50px;
-    padding-bottom: 30px;
-    border-bottom: 1px solid #3e3e3e;
+/* 章节按段落渲染 */
+.content .para {
+    margin: 0 0 0.9em;
 }
 
-.chapter-content:last-child {
-    border-bottom: none;
+/* 失焦自动伪装：内容模糊变淡，工具栏完全隐藏 */
+.content,
+.page-info,
+.global-progress {
+    transition: opacity 0.25s ease, filter 0.25s ease;
 }
 
-.chapter-content .chapter-title {
-    font-size: 14px;
-    font-weight: normal;
-    color: #e6edf3;
+body.unfocused .content {
+    filter: blur(7px);
+    opacity: 0.5;
+}
+
+body.unfocused .page-info {
+    opacity: 0.15;
+}
+
+body.unfocused .toolbar {
+    opacity: 0 !important;
+}
+
+/* 老板键伪装态：隐藏进度条 */
+body.boss-mode .global-progress {
+    opacity: 0;
+}
+
+/* 到底二次滚动翻章提示 */
+.next-hint {
+    position: fixed;
+    bottom: 14px;
+    left: 0;
+    right: 0;
+    text-align: center;
+    font-size: 11px;
     font-family: 'Consolas', monospace;
-    margin-bottom: 20px;
-    padding-bottom: 10px;
-    border-bottom: 1px solid #4e4e4e;
-    display: block;
+    color: rgba(133, 133, 133, 0.55);
+    opacity: 0;
+    transition: opacity 0.3s;
+    pointer-events: none;
+    z-index: 60;
 }
 
-.chapter-text {
-    color: #858585;
-    line-height: 1.6;
+.next-hint.visible {
+    opacity: 1;
 }
 
-.chapter-text .paragraph {
-    margin-bottom: 12px;
-    text-indent: 2em;
-    line-height: 1.8;
-    font-size: 14px;
-    color: #858585;
+/* 全书进度条：视口底部 2px 细线 */
+.global-progress {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    z-index: 50;
+    pointer-events: none;
+    background: rgba(62, 62, 62, 0.4);
+}
+
+.global-progress-fill {
+    height: 100%;
+    width: 0;
+    background: rgba(14, 99, 156, 0.55);
+    transition: width 0.2s;
 }
 
 .page-info {

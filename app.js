@@ -1,11 +1,22 @@
 // 摸鱼阅读器 - Electron版本
 const { ipcRenderer } = require('electron');
 
+// 调试日志开关：摸鱼场景默认静默，避免 DevTools 暴露阅读内容
+const DEBUG = false;
+function log(...args) {
+    if (DEBUG) log(...args);
+}
+
 // 全局变量
 let chapters = [];
 let currentChapterIndex = 0;
 let isAlwaysOnTop = true;
 let autoSaveInterval = null; // 自动保存定时器
+let renderSeq = 0; // 章节渲染序号，用于丢弃快速切章时的过期响应
+let pendingScroll = null; // 打开书籍后待恢复的滚动位置 { paraIndex, scrollTop }
+let bossModeActive = false; // 老板键伪装态
+let atBottomState = false; // 是否处于章节底部（等待二次滚动翻章）
+let bottomWheelAccum = 0; // 底部状态下滚动累积量
 let settings = {
     bgImage: null,
     bgScale: 100,
@@ -16,7 +27,8 @@ let settings = {
     bgColor: '#1e1e1e',
     windowOpacity: 100,
     contentOpacity: 95,
-    transparentMode: false
+    transparentMode: false,
+    stealthNames: true
 };
 
 // 书架和阅读进度
@@ -70,17 +82,14 @@ const bookshelfEl = getEl('bookshelf');
 const bookList = getEl('bookList');
 const backToShelfBtn = getEl('backToShelfBtn');
 
+// 摸鱼功能元素
+const nextHint = getEl('nextHint');                 // 到底二次滚动翻章提示
+const globalProgressFill = getEl('globalProgressFill'); // 全书进度条
+const stealthNamesInput = getEl('stealthNames');    // 章节名伪装开关
+
 // 初始化
 function init() {
-    console.log('Initializing app...');
-    console.log('mainContent:', mainContent);
-    console.log('settingsPanel:', settingsPanel);
-    console.log('closeSettingsBtn:', closeSettingsBtn);
-    console.log('settingsBtn:', settingsBtn);
-    console.log('chapterSelect:', chapterSelect);
-
-    // 强制清除旧的白底设置，使用深色主题
-    localStorage.removeItem('moyuReaderSettings');
+    log('Initializing app...');
 
     loadSettings();
     loadBookshelf();
@@ -105,12 +114,12 @@ function init() {
 
     showBookshelf();
 
-    console.log('App initialized');
+    log('App initialized');
 }
 
 // 绑定事件
 function bindEvents() {
-    console.log('Binding events...');
+    log('Binding events...');
     
     // 窗口控制
     if (minimizeBtn) {
@@ -134,9 +143,9 @@ function bindEvents() {
     
     if (settingsBtn && settingsPanel) {
         settingsBtn.addEventListener('click', () => {
-            console.log('Settings button clicked');
+            log('Settings button clicked');
             settingsPanel.classList.toggle('active');
-            console.log('Settings panel active:', settingsPanel.classList.contains('active'));
+            log('Settings panel active:', settingsPanel.classList.contains('active'));
         });
     }
     
@@ -174,10 +183,10 @@ function bindEvents() {
     // 章节选择器
     if (chapterSelect) {
         chapterSelect.addEventListener('change', (e) => {
-            console.log('Chapter select changed:', e.target.value);
+            log('Chapter select changed:', e.target.value);
             const newIndex = parseInt(e.target.value);
-            console.log('Current index:', currentChapterIndex, 'New index:', newIndex);
-            console.log('Chapters length:', chapters.length);
+            log('Current index:', currentChapterIndex, 'New index:', newIndex);
+            log('Chapters length:', chapters.length);
 
             if (isNaN(newIndex)) {
                 console.error('Invalid chapter index:', e.target.value);
@@ -186,7 +195,7 @@ function bindEvents() {
 
             if (newIndex >= 0 && newIndex < chapters.length) {
                 currentChapterIndex = newIndex;
-                console.log('Switching to chapter:', currentChapterIndex);
+                log('Switching to chapter:', currentChapterIndex);
                 renderChapter();
             } else {
                 console.error('Chapter index out of range:', newIndex);
@@ -208,9 +217,9 @@ function bindEvents() {
     // 关闭设置面板
     if (closeSettingsBtn && settingsPanel) {
         closeSettingsBtn.addEventListener('click', () => {
-            console.log('Close settings button clicked');
+            log('Close settings button clicked');
             settingsPanel.classList.remove('active');
-            console.log('Settings panel removed');
+            log('Settings panel removed');
         });
     }
     
@@ -321,6 +330,18 @@ function bindEvents() {
         backToShelfBtn.addEventListener('click', showBookshelf);
     }
 
+    // 章节名伪装开关
+    if (stealthNamesInput) {
+        stealthNamesInput.addEventListener('change', (e) => {
+            settings.stealthNames = e.target.checked;
+            saveSettings();
+            if (currentBook) {
+                updateChapterSelect();
+                if (chapterSelect) chapterSelect.value = currentChapterIndex;
+            }
+        });
+    }
+
     // 键盘快捷键
     document.addEventListener('keydown', (e) => {
         if (e.key === 'ArrowLeft' && chapters.length > 0) {
@@ -334,7 +355,7 @@ function bindEvents() {
 
     // 应用关闭前保存进度
     window.addEventListener('beforeunload', () => {
-        console.log('应用即将关闭，保存进度');
+        log('应用即将关闭，保存进度');
         saveReadingProgress();
 
         // 清除自动保存定时器
@@ -348,20 +369,52 @@ function bindEvents() {
         // 可以在这里添加窗口大小变化后的处理逻辑
     });
 
-    // 自动导入小说监听
+    // 老板键：全局快捷键切换伪装态
+    ipcRenderer.on('boss-key', toggleBossMode);
+
+    // 右键快速触发老板键（伪装/恢复），比快捷键更顺手；
+    // 设置面板内保留正常右键行为，不触发伪装
+    document.addEventListener('contextmenu', (e) => {
+        if (settingsPanel && settingsPanel.contains(e.target)) return;
+        e.preventDefault();
+        toggleBossMode();
+    });
+
+    // 全局翻章（Alt+Shift+←/→，应用失焦也生效）
+    ipcRenderer.on('global-prev-chapter', () => {
+        if (bossModeActive || !currentBook) return;
+        if (currentChapterIndex > 0) {
+            currentChapterIndex--;
+            renderChapter();
+        }
+    });
+    ipcRenderer.on('global-next-chapter', () => {
+        if (bossModeActive || !currentBook) return;
+        if (currentChapterIndex < chapters.length - 1) {
+            currentChapterIndex++;
+            renderChapter();
+        }
+    });
+
+    // 失焦自动伪装：内容模糊变淡，聚焦恢复
+    ipcRenderer.on('window-blur', () => {
+        if (!bossModeActive) document.body.classList.add('unfocused');
+    });
+    ipcRenderer.on('window-focus', () => {
+        document.body.classList.remove('unfocused');
+    });
+
+    // 自动导入小说监听（只接收元数据，正文由主进程按需提供）
     ipcRenderer.on('auto-import-novels', (event, novels) => {
-        console.log('收到自动导入的小说:', novels.length, '本');
-        console.log('导入前的书架书籍:', bookshelf.map(b => ({ title: b.title, id: b.id })));
+        log('收到自动导入的小说:', novels.length, '本');
 
         let importedCount = 0;
 
         novels.forEach(novel => {
             try {
-                const book = parseNovel(novel.content, novel.filename);
-                if (book) {
-                    addToBookshelf(book, true); // true 表示自动导入
-                    importedCount++;
-                }
+                const book = buildBookMeta(novel.filename, novel.filepath, novel.chapterTitles);
+                addToBookshelf(book, true); // true 表示自动导入
+                importedCount++;
             } catch (error) {
                 console.error('导入小说失败:', novel.filename, error);
             }
@@ -369,14 +422,8 @@ function bindEvents() {
 
         // 所有导入完成后显示书架
         if (importedCount > 0) {
-            console.log(`成功自动导入/更新 ${importedCount} 本小说`);
-            console.log('导入后的书架书籍:', bookshelf.map(b => ({ title: b.title, id: b.id })));
+            log(`成功自动导入/更新 ${importedCount} 本小说`);
             showBookshelf();
-
-            // 显示导入提示
-            setTimeout(() => {
-                console.log(`/* 已自动导入 ${importedCount} 本小说 */`);
-            }, 500);
         }
     });
 }
@@ -401,16 +448,21 @@ function updatePinButton() {
 }
 
 // 处理小说文件导入
-function handleFileImport(e) {
+async function handleFileImport(e) {
     const file = e.target.files[0];
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = (event) => {
-        const text = event.target.result;
-        const book = parseNovel(text, file.name);
-        if (book) {
+    reader.onload = async (event) => {
+        try {
+            const text = event.target.result;
+            // 正文写入主进程本地缓存文件，书架只保存元数据，避免 localStorage 超限导致卡死
+            const filepath = await ipcRenderer.invoke('novel:save-cache', file.name, text);
+            const { chapterTitles } = await ipcRenderer.invoke('novel:get-meta', filepath);
+            const book = buildBookMeta(file.name, filepath, chapterTitles);
             addToBookshelf(book);
+        } catch (error) {
+            console.error('导入小说失败:', file.name, error);
         }
     };
     reader.readAsText(file, 'UTF-8');
@@ -430,85 +482,16 @@ function handleBgImport(e) {
     reader.readAsDataURL(file);
 }
 
-// 解析小说内容
-function parseNovel(text, filename) {
-    const parsedChapters = [];
-    let foundChapters = false;
-
-    // 尝试按章节分割
-    const chapterPatterns = [
-        /第[0-9零一二三四五六七八九十百千万]+章/g,
-        /第[0-9零一二三四五六七八九十百千万]+节/g,
-        /Chapter\s+\d+/gi
-    ];
-
-    // 尝试第一种模式
-    let matches = text.split(chapterPatterns[0]);
-    if (matches.length > 1) {
-        const titles = text.match(chapterPatterns[0]);
-        for (let i = 0; i < matches.length; i++) {
-            if (matches[i].trim()) {
-                parsedChapters.push({
-                    title: titles && titles[i] ? titles[i] : `第${i + 1}部分`,
-                    content: matches[i].trim()
-                });
-            }
-        }
-        foundChapters = true;
-    }
-
-    // 如果没有章节，尝试第二种模式
-    if (!foundChapters) {
-        matches = text.split(chapterPatterns[1]);
-        if (matches.length > 1) {
-            const titles = text.match(chapterPatterns[1]);
-            for (let i = 0; i < matches.length; i++) {
-                if (matches[i].trim()) {
-                    parsedChapters.push({
-                        title: titles && titles[i] ? titles[i] : `第${i + 1}部分`,
-                        content: matches[i].trim()
-                    });
-                }
-            }
-            foundChapters = true;
-        }
-    }
-
-    // 如果还是没有章节，按大段落分割
-    if (!foundChapters) {
-        const paragraphs = text.split(/\n\n\n+/);
-        const chunkSize = 5;
-
-        for (let i = 0; i < paragraphs.length; i += chunkSize) {
-            const chunk = paragraphs.slice(i, i + chunkSize).join('\n\n');
-            if (chunk.trim()) {
-                parsedChapters.push({
-                    title: `Chapter ${Math.floor(i / chunkSize) + 1}`,
-                    content: chunk.trim()
-                });
-            }
-        }
-    }
-
-    // 如果还是只有一章，就整本作为一章
-    if (parsedChapters.length === 0) {
-        parsedChapters.push({
-            title: 'Chapter 1',
-            content: text.trim()
-        });
-    }
-
-    // 返回书籍对象
-    const bookTitle = filename.replace('.txt', '');
+// 由文件名/路径/章节标题列表构建书架元数据（不含正文，正文由主进程按需提供）
+function buildBookMeta(filename, filepath, chapterTitles) {
+    const bookTitle = filename.replace(/\.txt$/, '');
     // 使用文件名生成固定的 ID，确保同一本书的 ID 不变
     const bookId = 'book_' + filename.replace(/[^a-zA-Z0-9\u4e00-\u9fa5]/g, '_');
-
-    console.log('解析书籍 - 标题:', bookTitle, 'ID:', bookId, '章节数:', parsedChapters.length);
-
     return {
         id: bookId,
         title: bookTitle,
-        chapters: parsedChapters,
+        filepath: filepath,
+        chapterTitles: chapterTitles || [],
         addedTime: new Date().toISOString()
     };
 }
@@ -518,7 +501,20 @@ function loadBookshelf() {
     const saved = localStorage.getItem('moyuReaderBookshelf');
     if (saved) {
         try {
-            bookshelf = JSON.parse(saved);
+            const list = JSON.parse(saved);
+            // 兼容旧格式：剥离正文章节只保留元数据，下次自动导入会按文件名补全 filepath
+            let migrated = false;
+            bookshelf = (list || []).map(b => {
+                if (Array.isArray(b.chapters)) {
+                    b.chapterTitles = b.chapters.map(c => c.title);
+                    delete b.chapters;
+                    migrated = true;
+                }
+                if (!Array.isArray(b.chapterTitles)) b.chapterTitles = [];
+                return b;
+            });
+            // 剥离后立即持久化瘦身后的书架，释放 localStorage 空间
+            if (migrated) saveBookshelf();
         } catch (e) {
             bookshelf = [];
         }
@@ -539,11 +535,11 @@ function addToBookshelf(book, isAutoImport = false) {
             ...book,
             addedTime: existingBook.addedTime  // 保留原来的添加时间
         };
-        console.log('更新已存在的书籍:', book.title, 'ID:', book.id);
+        log('更新已存在的书籍:', book.title, 'ID:', book.id);
     } else {
         // 添加新书籍
         bookshelf.push(book);
-        console.log('添加新书籍:', book.title, 'ID:', book.id);
+        log('添加新书籍:', book.title, 'ID:', book.id);
     }
     saveBookshelf();
 
@@ -562,7 +558,8 @@ function renderBookshelf() {
 
     bookshelf.forEach(book => {
         const progress = readingProgress[book.id];
-        const progressPercent = progress ? Math.round((progress.chapterIndex + 1) / book.chapters.length * 100) : 0;
+        const chapterCount = Array.isArray(book.chapterTitles) ? book.chapterTitles.length : 0;
+        const progressPercent = progress ? Math.round((progress.chapterIndex + 1) / Math.max(chapterCount, 1) * 100) : 0;
         const lastRead = progress ? new Date(progress.timestamp).toLocaleDateString() : '未阅读';
 
         const bookItem = document.createElement('div');
@@ -570,7 +567,7 @@ function renderBookshelf() {
         bookItem.innerHTML = `
             <button class="delete-book-btn" onclick="event.stopPropagation(); deleteBook('${book.id}')">×</button>
             <div class="book-title">${book.title}</div>
-            <div class="book-info">${book.chapters.length} 章节</div>
+            <div class="book-info">${chapterCount} 章节</div>
             <div class="book-info">${lastRead}</div>
             <div class="book-progress">
                 <div class="book-progress-bar" style="width: ${progressPercent}%"></div>
@@ -604,29 +601,40 @@ function showBookshelf() {
 }
 
 function openBook(bookId) {
-    console.log('Opening book:', bookId);
+    log('Opening book:', bookId);
     const book = bookshelf.find(b => b.id === bookId);
     if (!book) {
         console.error('Book not found:', bookId);
         return;
     }
 
-    console.log('Book found:', book.title, 'Chapters:', book.chapters.length);
-    console.log('当前阅读进度对象:', readingProgress);
-    console.log('查找书ID的进度:', readingProgress[bookId]);
+    // 旧数据书籍没有内容文件路径，提示用户恢复来源
+    if (!book.filepath) {
+        alert('该书籍缺少内容文件（旧格式数据），请将 txt 放入 txt_source 后重启，或重新导入。');
+        return;
+    }
+
+    log('Book found:', book.title, 'Chapters:', book.chapterTitles.length);
 
     currentBook = book;
-    chapters = book.chapters;
+    // 书架只存标题元数据，正文在 renderChapter 时按章加载
+    chapters = book.chapterTitles.map(title => ({ title }));
 
     // 恢复阅读进度
     const progress = readingProgress[bookId];
-    if (progress && progress.chapterIndex !== undefined) {
+    if (progress) {
         currentChapterIndex = Math.min(progress.chapterIndex, chapters.length - 1);
-        console.log('恢复阅读进度 - 章节:', currentChapterIndex, '滚动位置:', progress.scrollPosition);
+        log('恢复阅读进度 - 章节:', currentChapterIndex, '段落:', progress.paragraphIndex);
     } else {
         currentChapterIndex = 0;
-        console.log('没有找到阅读进度，从第一章开始');
+        log('没有找到阅读进度，从第一章开始');
     }
+
+    // 滚动位置由 renderChapter 在内容加载完成后恢复（段落级优先，scrollTop 兜底）
+    pendingScroll = progress ? {
+        paraIndex: progress.paragraphIndex != null ? progress.paragraphIndex : null,
+        scrollTop: progress.scrollPosition || 0
+    } : null;
 
     bookshelfEl.style.display = 'none';
     reader.style.display = 'block';
@@ -648,29 +656,8 @@ function openBook(bookId) {
         nextChapterBtn.style.display = 'block';
     }
 
-    renderChapter(false); // 不自动滚动,由 openBook 控制滚动位置
+    renderChapter();
     setupScrollListener();
-    scrollCheckEnabled = true;
-
-    // 恢复滚动位置
-    if (progress && progress.scrollPosition !== undefined) {
-        setTimeout(() => {
-            mainContent.scrollTop = progress.scrollPosition;
-            console.log('恢复滚动位置:', progress.scrollPosition);
-        }, 150);
-    } else {
-        // 如果没有进度,滚动到当前章节的默认位置
-        setTimeout(() => {
-            const chapterElements = content.querySelectorAll('.chapter-content');
-            if (currentChapterIndex > 0 && chapterElements.length > 0) {
-                const prevChapterEl = chapterElements[0];
-                mainContent.scrollTop = prevChapterEl.scrollHeight;
-            } else {
-                mainContent.scrollTop = 0;
-            }
-            updateChapterTitle();
-        }, 150);
-    }
 
     // 启动自动保存进度定时器（每30秒保存一次）
     if (autoSaveInterval) {
@@ -678,7 +665,7 @@ function openBook(bookId) {
     }
     autoSaveInterval = setInterval(() => {
         saveReadingProgress();
-        console.log('自动保存进度');
+        log('自动保存进度');
     }, 30000);
 }
 
@@ -693,386 +680,296 @@ window.deleteBook = function(bookId) {
     }
 }
 
-// 阅读进度保存
+// 阅读进度保存（段落级 + 滚动位置兜底；伪装态下跳过保存）
 function saveReadingProgress() {
-    if (!currentBook) {
-        console.log('无法保存进度：currentBook 为空');
-        return;
-    }
+    if (!currentBook || bossModeActive) return;
 
     readingProgress[currentBook.id] = {
         chapterIndex: currentChapterIndex,
+        paragraphIndex: getParagraphIndex(),
         scrollPosition: mainContent ? mainContent.scrollTop : 0,
         timestamp: new Date().toISOString()
     };
 
-    const progressStr = JSON.stringify(readingProgress);
-    localStorage.setItem('moyuReaderProgress', progressStr);
+    localStorage.setItem('moyuReaderProgress', JSON.stringify(readingProgress));
+}
 
-    console.log('保存阅读进度 - 书籍ID:', currentBook.id, '章节:', currentChapterIndex);
-    console.log('保存的进度数据长度:', progressStr.length);
+// 计算当前视口顶部对应的段落索引，用于段落级进度恢复
+function getParagraphIndex() {
+    if (!content || !mainContent) return null;
+    const paras = content.children;
+    if (!paras.length) return null;
+    const st = mainContent.scrollTop;
+    for (let i = 0; i < paras.length; i++) {
+        if (paras[i].offsetTop > st) return Math.max(0, i - 1);
+    }
+    return paras.length - 1;
 }
 
 function loadReadingProgress() {
     const saved = localStorage.getItem('moyuReaderProgress');
-    console.log('加载阅读进度，保存的数据:', saved);
+    log('加载阅读进度，保存的数据:', saved);
 
     if (saved) {
         try {
             readingProgress = JSON.parse(saved);
-            console.log('解析后的阅读进度:', readingProgress);
-            console.log('阅读进度包含的书籍:', Object.keys(readingProgress));
+            log('阅读进度包含的书籍:', Object.keys(readingProgress));
         } catch (e) {
             console.error('解析阅读进度失败:', e);
             readingProgress = {};
         }
-    } else {
-        console.log('没有找到保存的阅读进度');
     }
 }
 
-// 设置滚动监听 - 将整本书作为整体滚动
+// 设置滚动监听
 let scrollTimeout = null;
 let scrollCheckEnabled = false;
-let isRenderingChapter = false;
-let loadedChapters = new Set(); // 记录已加载的章节索引
+let lastWheelEvent = 0;
+let wheelDeltaY = 0;
 
 function setupScrollListener() {
     if (!mainContent) return;
 
-    // 滚动事件 - 根据滚动位置更新当前章节
-    mainContent.addEventListener('scroll', () => {
-        if (!scrollCheckEnabled || isRenderingChapter) return;
+    // 鼠标滚轮事件 - 上滑顶部回上一章；底部二次滚动确认后翻下一章
+    mainContent.addEventListener('wheel', (e) => {
+        const now = Date.now();
+        const timeSinceLastWheel = now - lastWheelEvent;
 
+        // 累积滚轮值
+        wheelDeltaY += e.deltaY;
+
+        // 防抖处理，避免频繁切换
+        if (timeSinceLastWheel > 200) {
+            // 章节底部：继续下滑超过阈值才翻章，保证最后一屏看得完
+            if (atBottomState && e.deltaY > 0) {
+                bottomWheelAccum += e.deltaY;
+                if (bottomWheelAccum > 150 && currentChapterIndex < chapters.length - 1) {
+                    currentChapterIndex++;
+                    renderChapter();
+                    bottomWheelAccum = 0;
+                    wheelDeltaY = 0;
+                }
+            } else if (e.deltaY < 0 && mainContent.scrollTop < 50 && currentChapterIndex > 0) {
+                // 上滑：deltaY为负值，且在页面顶部附近，累积上滑距离超过阈值
+                if (Math.abs(wheelDeltaY) > 100) {
+                    currentChapterIndex--;
+                    renderChapter();
+                    wheelDeltaY = 0; // 重置累积值
+                }
+            } else if (e.deltaY > 0) {
+                // 下滑时重置累积值
+                wheelDeltaY = Math.min(0, wheelDeltaY);
+            }
+
+            // 定期重置累积值
+            if (Math.abs(wheelDeltaY) < 50 && Math.abs(e.deltaY) < 50) {
+                wheelDeltaY = 0;
+            }
+        }
+
+        lastWheelEvent = now;
+    }, { passive: true });
+
+    // 滚动事件 - 底部状态检测 + 进度条 + 保存进度
+    mainContent.addEventListener('scroll', () => {
+        if (!scrollCheckEnabled) return;
+
+        updateGlobalProgress();
         clearTimeout(scrollTimeout);
         scrollTimeout = setTimeout(() => {
-            updateCurrentChapterByScroll();
-            saveReadingProgress();
-        }, 100);
+            checkScrollToBottom();
+            saveReadingProgress(); // 自动保存阅读进度
+        }, 300);
     });
 }
 
-// 根据滚动位置更新当前章节
-function updateCurrentChapterByScroll() {
-    if (!mainContent || !content) return;
+// 滚动状态检测：到底显示提示（等待二次滚动翻章）
+function checkScrollToBottom() {
+    if (!mainContent) return;
 
-    const scrollTop = mainContent.scrollTop;
-    const chapterElements = content.querySelectorAll('.chapter-content');
-
-    // 找到当前滚动位置所在的DOM章节元素
-    let foundElementIndex = -1;
-    let offsetSum = 0;
-
-    for (let i = 0; i < chapterElements.length; i++) {
-        const chapterEl = chapterElements[i];
-        const chapterHeight = chapterEl.scrollHeight;
-
-        if (scrollTop >= offsetSum && scrollTop < offsetSum + chapterHeight) {
-            // 找到当前章节元素
-            foundElementIndex = i;
-            break;
-        }
-
-        offsetSum += chapterHeight;
-    }
-
-    // 如果滚动到最后一个章节元素
-    if (foundElementIndex === -1 && chapterElements.length > 0) {
-        foundElementIndex = chapterElements.length - 1;
-    }
-
-    // 从DOM元素的 data-chapter-index 属性获取实际章节索引
-    let actualChapterIndex = -1;
-    if (foundElementIndex >= 0 && chapterElements[foundElementIndex]) {
-        actualChapterIndex = parseInt(chapterElements[foundElementIndex].dataset.chapterIndex);
-    }
-
-    // 调试信息
-    console.log('滚动检测 - scrollTop:', scrollTop, 'foundElementIndex:', foundElementIndex,
-                'actualChapterIndex:', actualChapterIndex, 'currentChapterIndex:', currentChapterIndex);
-
-    // 检查是否需要加载更多章节
-    const scrollHeight = mainContent.scrollHeight;
-    const clientHeight = mainContent.clientHeight;
-
-    // 获取当前DOM中最小和最大的章节索引
-    const chapterIndexes = Array.from(chapterElements).map(el => parseInt(el.dataset.chapterIndex));
-    const minChapterIndex = Math.min(...chapterIndexes);
-    const maxChapterIndex = Math.max(...chapterIndexes);
-
-    console.log('DOM章节范围:', minChapterIndex, '到', maxChapterIndex);
-
-    // 滚动到顶部附近,需要加载上一章
-    if (scrollTop < 100 && minChapterIndex > 0) {
-        loadPrevChapter();
-    }
-    // 滚动到底部附近,需要加载下一章
-    else if (scrollHeight - scrollTop - clientHeight < 200 && maxChapterIndex < chapters.length - 1) {
-        loadNextChapter();
-    }
-
-    // 更新当前章节索引
-    if (actualChapterIndex >= 0 && actualChapterIndex < chapters.length && actualChapterIndex !== currentChapterIndex) {
-        currentChapterIndex = actualChapterIndex;
-        updateChapterTitle();
-        updateChapterSelect();
-        console.log('✅ 当前章节更新为:', currentChapterIndex + 1, chapters[currentChapterIndex].title);
+    const nearBottom = mainContent.scrollHeight - mainContent.scrollTop - mainContent.clientHeight < 60;
+    if (nearBottom !== atBottomState) {
+        atBottomState = nearBottom;
+        bottomWheelAccum = 0;
+        showNextHint(nearBottom);
     }
 }
 
-// 加载上一章并插入到当前内容之前
-function loadPrevChapter() {
-    // 获取当前DOM中最小的章节索引
-    const chapterElements = content.querySelectorAll('.chapter-content');
-    const chapterIndexes = Array.from(chapterElements).map(el => parseInt(el.dataset.chapterIndex));
-    const minChapterIndex = Math.min(...chapterIndexes);
-
-    // 加载最小索引的前一章
-    const prevIndex = minChapterIndex - 1;
-
-    // 检查是否已经加载过
-    if (prevIndex < 0 || loadedChapters.has(prevIndex) || isRenderingChapter) {
-        console.log('⏭️ 跳过加载上一章 - prevIndex:', prevIndex,
-                    'loadedChapters:', Array.from(loadedChapters),
-                    'isRenderingChapter:', isRenderingChapter);
-        return;
-    }
-
-    isRenderingChapter = true;
-    const prevChapter = chapters[prevIndex];
-
-    if (!prevChapter) {
-        isRenderingChapter = false;
-        return;
-    }
-
-    console.log('📖 加载上一章:', prevChapter.title, '索引:', prevIndex);
-
-    // 保存当前滚动位置
-    const currentScrollTop = mainContent.scrollTop;
-
-    // 创建上一章的内容元素,并存储章节索引
-    const prevChapterEl = document.createElement('div');
-    prevChapterEl.className = 'chapter-content';
-    prevChapterEl.dataset.chapterIndex = prevIndex; // 存储章节索引
-    prevChapterEl.innerHTML = `
-        <h2 class="chapter-title">${prevChapter.title}</h2>
-        <div class="chapter-text">${formatContent(prevChapter.content)}</div>
-    `;
-
-    // 将上一章插入到当前内容之前
-    content.insertBefore(prevChapterEl, content.firstChild);
-
-    // 标记为已加载
-    loadedChapters.add(prevIndex);
-
-    // 恢复滚动位置(加上新插入的内容高度)
-    setTimeout(() => {
-        const prevHeight = prevChapterEl.scrollHeight;
-        mainContent.scrollTop = currentScrollTop + prevHeight;
-
-        updateChapterTitle();
-        updateChapterSelect();
-
-        isRenderingChapter = false;
-        console.log('上一章加载完成,章节索引:', prevIndex);
-    }, 50);
+// 显示/隐藏"二次滚动翻章"提示（最后一章不显示）
+function showNextHint(visible) {
+    if (!nextHint) return;
+    nextHint.classList.toggle('visible', visible && currentChapterIndex < chapters.length - 1);
 }
 
-// 加载下一章并追加到内容之后
-function loadNextChapter() {
-    // 获取当前DOM中最大的章节索引
-    const chapterElements = content.querySelectorAll('.chapter-content');
-    const chapterIndexes = Array.from(chapterElements).map(el => parseInt(el.dataset.chapterIndex));
-    const maxChapterIndex = Math.max(...chapterIndexes);
-
-    // 加载最大索引的后一章
-    const nextIndex = maxChapterIndex + 1;
-
-    // 检查是否已经加载过
-    if (nextIndex >= chapters.length || loadedChapters.has(nextIndex) || isRenderingChapter) {
-        console.log('⏭️ 跳过加载下一章 - nextIndex:', nextIndex,
-                    'loadedChapters:', Array.from(loadedChapters),
-                    'isRenderingChapter:', isRenderingChapter);
-        return;
-    }
-
-    isRenderingChapter = true;
-    const nextChapter = chapters[nextIndex];
-
-    if (!nextChapter) {
-        isRenderingChapter = false;
-        return;
-    }
-
-    console.log('📖 加载下一章:', nextChapter.title, '索引:', nextIndex);
-
-    // 保存当前滚动位置
-    const currentScrollTop = mainContent.scrollTop;
-
-    // 创建下一章的内容元素,并存储章节索引
-    const nextChapterEl = document.createElement('div');
-    nextChapterEl.className = 'chapter-content';
-    nextChapterEl.dataset.chapterIndex = nextIndex; // 存储章节索引
-    nextChapterEl.innerHTML = `
-        <h2 class="chapter-title">${nextChapter.title}</h2>
-        <div class="chapter-text">${formatContent(nextChapter.content)}</div>
-    `;
-
-    // 将下一章追加到内容之后
-    content.appendChild(nextChapterEl);
-
-    // 标记为已加载
-    loadedChapters.add(nextIndex);
-
-    // 恢复滚动位置
-    setTimeout(() => {
-        mainContent.scrollTop = currentScrollTop;
-        updateChapterTitle();
-        updateChapterSelect();
-
-        isRenderingChapter = false;
-        console.log('下一章加载完成,章节索引:', nextIndex);
-    }, 50);
+// 更新视口底部的全书进度条（当前章 + 章内滚动比例）
+function updateGlobalProgress() {
+    if (!globalProgressFill || !chapters.length || !mainContent) return;
+    const max = mainContent.scrollHeight - mainContent.clientHeight;
+    const inChapter = max > 0 ? Math.min(mainContent.scrollTop / max, 1) : 0;
+    const ratio = (currentChapterIndex + inChapter) / chapters.length;
+    globalProgressFill.style.width = (ratio * 100).toFixed(2) + '%';
 }
 
-// 格式化内容(将换行转换为段落)
-function formatContent(text) {
-    return text.split('\n').map(line => {
-        const trimmed = line.trim();
-        return trimmed ? `<p class="paragraph">${trimmed}</p>` : '';
-    }).join('');
-}
-
-// 更新当前章节标题
-function updateChapterTitle() {
-    if (chapterTitle && chapters[currentChapterIndex]) {
-        chapterTitle.textContent = chapters[currentChapterIndex].title;
-    }
-    if (chapterInfo) {
-        chapterInfo.textContent = `${currentChapterIndex + 1} / ${chapters.length}`;
-    }
+// 章节名伪装：下拉框显示成源码文件路径，避免暴露书名/章节信息
+function disguiseChapterTitle(index) {
+    return 'src/chapter_' + String(index + 1).padStart(3, '0') + '.ts';
 }
 
 // 更新章节选择器
 function updateChapterSelect() {
     if (!chapterSelect || !chapters.length) {
-        console.log('Cannot update chapter select:', { chapterSelect: !!chapterSelect, chaptersLength: chapters.length });
         return;
     }
 
-    console.log('Updating chapter select with', chapters.length, 'chapters');
+    // 批量构建（长篇小说上千章时避免逐个 append 造成卡顿）
     chapterSelect.innerHTML = '';
+    const frag = document.createDocumentFragment();
     chapters.forEach((chapter, index) => {
         const option = document.createElement('option');
         option.value = index;
-        option.textContent = chapter.title;
-        chapterSelect.appendChild(option);
+        option.textContent = settings.stealthNames ? disguiseChapterTitle(index) : chapter.title;
+        frag.appendChild(option);
     });
-    console.log('Chapter select updated');
+    chapterSelect.appendChild(frag);
 }
 
-// 渲染章节 - 初始化时加载当前章节及相邻章节
-function renderChapter(shouldScroll = true) {
-    console.log('Rendering chapter:', currentChapterIndex);
-    console.log('Chapters array:', chapters);
-    console.log('Content element:', content);
+// 按段落渲染章节内容（段落级进度定位依赖段落元素）
+function renderParagraphs(text) {
+    content.innerHTML = '';
+    const frag = document.createDocumentFragment();
+    text.split(/\n+/).map(s => s.trim()).filter(Boolean).forEach(p => {
+        const div = document.createElement('div');
+        div.className = 'para';
+        div.textContent = p;
+        frag.appendChild(div);
+    });
+    content.appendChild(frag);
+}
 
+// 渲染章节（异步：正文由主进程按需提供，单章仅几 KB）
+async function renderChapter() {
+    if (!currentBook || !chapters.length || bossModeActive) return;
+
+    const seq = ++renderSeq; // 竞态保护：快速切章时丢弃过期响应
     const chapter = chapters[currentChapterIndex];
     if (!chapter) {
         console.error('Chapter not found at index:', currentChapterIndex);
-        console.error('Available chapters:', chapters.map((c, i) => `${i}: ${c.title}`));
         return;
     }
 
-    console.log('Chapter content length:', chapter.content?.length || 0);
-
-    // 清空内容和重置状态
-    content.innerHTML = '';
-    loadedChapters.clear();
-
-    // 构建上一章的内容(如果存在)
-    let prevChapterHeight = 0;
-    if (currentChapterIndex > 0) {
-        const prevChapter = chapters[currentChapterIndex - 1];
-        const prevChapterEl = document.createElement('div');
-        prevChapterEl.className = 'chapter-content';
-        prevChapterEl.dataset.chapterIndex = currentChapterIndex - 1; // 存储章节索引
-        prevChapterEl.innerHTML = `
-            <h2 class="chapter-title">${prevChapter.title}</h2>
-            <div class="chapter-text">${formatContent(prevChapter.content)}</div>
-        `;
-        content.appendChild(prevChapterEl);
-        loadedChapters.add(currentChapterIndex - 1);
-    }
-
-    // 构建当前章节的内容
-    const chapterEl = document.createElement('div');
-    chapterEl.className = 'chapter-content';
-    chapterEl.dataset.chapterIndex = currentChapterIndex; // 存储章节索引
-    chapterEl.innerHTML = `
-        <h2 class="chapter-title">${chapter.title}</h2>
-        <div class="chapter-text">${formatContent(chapter.content)}</div>
-    `;
-    content.appendChild(chapterEl);
-    loadedChapters.add(currentChapterIndex);
-
-    // 预加载下一章(如果存在)
-    if (currentChapterIndex < chapters.length - 1) {
-        const nextChapter = chapters[currentChapterIndex + 1];
-        const nextChapterEl = document.createElement('div');
-        nextChapterEl.className = 'chapter-content';
-        nextChapterEl.dataset.chapterIndex = currentChapterIndex + 1; // 存储章节索引
-        nextChapterEl.innerHTML = `
-            <h2 class="chapter-title">${nextChapter.title}</h2>
-            <div class="chapter-text">${formatContent(nextChapter.content)}</div>
-        `;
-        content.appendChild(nextChapterEl);
-        loadedChapters.add(currentChapterIndex + 1);
-    }
-
-    // 只有在需要滚动时才设置默认滚动位置
-    if (shouldScroll) {
-        setTimeout(() => {
-            const chapterElements = content.querySelectorAll('.chapter-content');
-
-            // 找到当前章节元素的索引(因为有上一章的话,当前章是第二个元素)
-            let currentChapterElementIndex = 0;
-            if (currentChapterIndex > 0) {
-                currentChapterElementIndex = 1;
-                const prevChapterEl = chapterElements[0];
-                prevChapterHeight = prevChapterEl.scrollHeight;
-                mainContent.scrollTop = prevChapterHeight;
-            } else {
-                mainContent.scrollTop = 0;
-            }
-
-            // 更新章节标题和信息
-            updateChapterTitle();
-
-            console.log('滚动到当前章节,位置:', mainContent.scrollTop, '上一章高度:', prevChapterHeight);
-        }, 50);
-    } else {
-        // 不滚动,只更新标题
-        setTimeout(() => {
-            updateChapterTitle();
-        }, 50);
+    if (chapterInfo) {
+        chapterInfo.textContent = `${currentChapterIndex + 1} / ${chapters.length}`;
     }
 
     // 更新章节选择器
     if (chapterSelect) {
         chapterSelect.value = currentChapterIndex;
-        console.log('Chapter select value set to:', chapterSelect.value);
     }
 
     // 更新按钮状态
     prevChapterBtn.disabled = currentChapterIndex === 0;
     nextChapterBtn.disabled = currentChapterIndex === chapters.length - 1;
 
+    // 按需向主进程请求本章正文
+    if (content && currentBook.filepath) {
+        content.innerHTML = '';
+        try {
+            const text = await ipcRenderer.invoke('novel:get-chapter', currentBook.filepath, currentChapterIndex);
+            if (seq !== renderSeq) return; // 已切到其他章节，丢弃本次响应
+            if (text != null) {
+                renderParagraphs(text);
+            } else {
+                content.textContent = '内容加载失败，请检查源文件是否存在。';
+            }
+        } catch (error) {
+            if (seq !== renderSeq) return;
+            console.error('加载章节内容失败:', error);
+            content.textContent = '内容加载失败。';
+        }
+    }
+
+    // 处理滚动：恢复上次进度（段落级优先）或回到顶部
+    if (mainContent) {
+        if (pendingScroll) {
+            // 恢复滚动期间禁用底部检测，避免误触发翻章
+            scrollCheckEnabled = false;
+            const paras = content ? content.children : null;
+            if (pendingScroll.paraIndex != null && paras && pendingScroll.paraIndex < paras.length) {
+                mainContent.scrollTop = paras[pendingScroll.paraIndex].offsetTop;
+            } else {
+                mainContent.scrollTop = pendingScroll.scrollTop || 0;
+            }
+            pendingScroll = null;
+            setTimeout(() => { scrollCheckEnabled = true; }, 300);
+        } else {
+            mainContent.scrollTop = 0;
+            scrollCheckEnabled = true;
+        }
+    }
+
+    // 重置底部状态与提示，更新进度条
+    atBottomState = false;
+    bottomWheelAccum = 0;
+    showNextHint(false);
+    updateGlobalProgress();
+
     // 保存阅读进度
     saveReadingProgress();
+}
 
-    console.log('章节渲染完成,已加载章节:', Array.from(loadedChapters));
+// ==================== 老板键伪装 ====================
+// 生成一段以假乱真的前端构建日志
+function buildFakeLogLines() {
+    const files = [
+        'src/main.ts', 'src/app.vue', 'src/router/index.ts',
+        'src/store/modules/user.ts', 'src/api/request.ts',
+        'src/components/DataTable/index.vue', 'src/components/ChartPanel/index.vue',
+        'src/utils/format.ts', 'src/hooks/useAuth.ts',
+        'src/views/dashboard/index.vue', 'src/directive/permission.ts',
+        'src/api/modules/order.ts', 'src/layout/index.vue'
+    ];
+    const tags = ['INFO', 'INFO', 'INFO', 'DEBUG'];
+    const lines = [];
+    const start = Date.now() - 4200;
+    const total = 34 + Math.floor(Math.random() * 12);
+    for (let i = 0; i < total; i++) {
+        const t = new Date(start + i * 120 + Math.floor(Math.random() * 60));
+        const ts = t.toTimeString().slice(0, 8) + '.' + String(t.getMilliseconds()).padStart(3, '0');
+        const tag = tags[i % tags.length];
+        const f = files[Math.floor(Math.random() * files.length)];
+        const action = i === 0
+            ? 'vite v5.4.2 building for production...'
+            : `transforming (${i + 1}) ${f}`;
+        lines.push(`[${ts}] [${tag}] ${action}`);
+    }
+    lines.push(`[${new Date().toTimeString().slice(0, 8)}] [INFO] \u2713 built in ${(3 + Math.random() * 2).toFixed(2)}s`);
+    return lines;
+}
+
+// 老板键：进入伪装态（内容替换为构建日志），再按恢复当前章节
+function toggleBossMode() {
+    bossModeActive = !bossModeActive;
+    if (bossModeActive) {
+        if (settingsPanel) settingsPanel.classList.remove('active');
+        showNextHint(false);
+        document.body.classList.add('boss-mode');
+        if (content) {
+            content.innerHTML = '';
+            const frag = document.createDocumentFragment();
+            buildFakeLogLines().forEach(line => {
+                const div = document.createElement('div');
+                div.className = 'para';
+                div.textContent = line;
+                frag.appendChild(div);
+            });
+            content.appendChild(frag);
+        }
+        if (mainContent) mainContent.scrollTop = 0;
+        if (chapterInfo) chapterInfo.textContent = 'build ok';
+    } else {
+        document.body.classList.remove('boss-mode');
+        renderChapter(); // 重新拉取当前章节，恢复阅读内容
+    }
 }
 
 // 应用设置
@@ -1151,7 +1048,9 @@ function resetAllSettings() {
     bgColorInput.value = '#1e1e1e';
     contentOpacityInput.value = 95;
     document.getElementById('contentOpacityValue').textContent = '95%';
-    
+    if (stealthNamesInput) stealthNamesInput.checked = true;
+    settings.stealthNames = true;
+
     applySettings();
     saveSettings();
     
@@ -1199,6 +1098,7 @@ function loadSettings() {
             bgColorInput.value = '#1e1e1e';  // 强制更新为深色
             contentOpacityInput.value = settings.contentOpacity;
             document.getElementById('contentOpacityValue').textContent = settings.contentOpacity + '%';
+            if (stealthNamesInput) stealthNamesInput.checked = settings.stealthNames !== false;
 
             // 应用窗口设置
             ipcRenderer.send('window-set-opacity', settings.windowOpacity / 100);
