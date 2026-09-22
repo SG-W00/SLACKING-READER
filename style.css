@@ -153,6 +153,8 @@ body {
     scroll-behavior: smooth;
     -webkit-overflow-scrolling: touch;
     position: relative;
+    /* 底部 2px 占位给进度条：fixed 覆盖层不占布局会压在最后一行文字上 */
+    border-bottom: 2px solid rgba(62, 62, 62, 0.35);
 }
 
 /* 程序聚焦阅读区（空格翻页焦点）时不显示焦点轮廓 */
@@ -475,7 +477,7 @@ body.boss-mode .next-hint {
     opacity: 1;
 }
 
-/* 全书进度条：视口底部 2px 细线 */
+/* 全书进度条：视口底部 2px 细线（底色由 mainContent 的 border 提供，避免叠加变色） */
 .global-progress {
     position: fixed;
     bottom: 0;
@@ -484,7 +486,7 @@ body.boss-mode .next-hint {
     height: 2px;
     z-index: 50;
     pointer-events: none;
-    background: rgba(62, 62, 62, 0.4);
+    background: transparent;
 }
 
 .global-progress-fill {

@@ -51,12 +51,6 @@
                 <div class="page-info" id="pageInfo">
                     <span id="chapterInfo">1 / 1</span>
                 </div>
-                <!-- 到底后二次滚动翻章提示 -->
-                <div class="next-hint" id="nextHint">&#9662; scroll for next</div>
-                <!-- 全书进度条（视口底部细线） -->
-                <div class="global-progress"><div class="global-progress-fill" id="globalProgressFill"></div></div>
-                <!-- 沉浸模式进入提示 -->
-                <div class="immersive-hint" id="immersiveHint">press H to restore</div>
             </div>
         </div>
     </div>
@@ -152,6 +146,15 @@
 
     <!-- 沉浸模式右下角窗口调整手柄 -->
     <div class="resize-handle" id="resizeHandle" title="resize"></div>
+
+    <!-- 悬浮层必须挂在 body 直下：阅读区的 backdrop-filter 会劫持内部 fixed 元素的定位基准，
+         导致进度条/提示跑到滚动内容底部随内容滚动 -->
+    <!-- 到底后二次滚动翻章提示 -->
+    <div class="next-hint" id="nextHint">&#9662; scroll for next</div>
+    <!-- 全书进度条（视口底部细线） -->
+    <div class="global-progress"><div class="global-progress-fill" id="globalProgressFill"></div></div>
+    <!-- 沉浸模式进入提示 -->
+    <div class="immersive-hint" id="immersiveHint">press H to restore</div>
     
     <script src="app.js"></script>
 </body>
