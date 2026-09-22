@@ -379,8 +379,26 @@ function bindEvents() {
             nextChapterBtn.click();
         } else if (e.key === 'Escape') {
             settingsPanel.classList.remove('active');
+        } else if (e.key === ' ' && !bossModeActive) {
+            // 空格阅读：章节底部时按空格翻下一章（与滚轮二次确认一致）
+            // 实时判定底部，不依赖滚动防抖状态，连续快按也生效
+            const tag = ((e.target && e.target.tagName) || '').toLowerCase();
+            if (tag === 'select' || tag === 'input' || tag === 'textarea') return;
+            if (!currentBook || !chapters.length || !mainContent) return;
+            const nearBottom = mainContent.scrollHeight - mainContent.scrollTop - mainContent.clientHeight < 60;
+            if (nearBottom && currentChapterIndex < chapters.length - 1) {
+                e.preventDefault(); // 翻章，同时阻止到底后无效滚动
+                currentChapterIndex++;
+                renderChapter();
+            }
+        } else if ((e.key === 'q' || e.key === 'Q') && !e.ctrlKey && !e.altKey && !e.metaKey) {
+            // 一级伪装切换（与右键等效）：内容替换为构建日志 / 恢复
+            const tag = ((e.target && e.target.tagName) || '').toLowerCase();
+            if (tag === 'select' || tag === 'input' || tag === 'textarea') return;
+            toggleBossMode();
         } else if ((e.key === 'h' || e.key === 'H') && !e.ctrlKey && !e.altKey && !e.metaKey) {
-            // 沉浸/无边框三态循环：下拉/输入控件聚焦时不触发，避免交互冲突
+            // 沉浸模式两态切换：长按连发(repeat)与控件聚焦时不触发
+            if (e.repeat) return;
             const tag = ((e.target && e.target.tagName) || '').toLowerCase();
             if (tag === 'select' || tag === 'input' || tag === 'textarea') return;
             cycleImmersive();
