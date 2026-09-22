@@ -1107,6 +1107,9 @@ function toggleBossMode() {
         }
         bossReturnScroll = null;
         renderChapter();
+        // 伪装切换会清空重建内容导致阅读区丢失键盘焦点（空格翻页失灵），
+        // 主动把焦点还给阅读区；preventScroll 避免干扰滚动位置恢复
+        if (mainContent) mainContent.focus({ preventScroll: true });
     }
 }
 
