@@ -613,6 +613,109 @@ body.boss-mode .next-hint {
     font-size: 12px;
 }
 
+/* 沉浸模式：隐藏标题栏与工具栏，正文撑满全窗（H 键切换恢复） */
+body.immersive .title-bar,
+body.immersive .toolbar {
+    display: none;
+}
+
+body.immersive .app-container {
+    height: 100vh;
+}
+
+/* 沉浸/无边框模式顶部隐形拖动带：拖动移动窗口位置 */
+body.immersive::before {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 8px;
+    -webkit-app-region: drag;
+    z-index: 90;
+}
+
+/* 无边框模式：窗口背景全透明，只留正文文字，融入 IDE */
+body.borderless {
+    background: transparent;
+}
+
+body.borderless .main-content {
+    background: transparent !important;
+    backdrop-filter: none !important;
+    background-image: none !important;
+}
+
+/* 沉浸模式进入提示：右上角短暂显示后淡出 */
+.immersive-hint {
+    position: fixed;
+    top: 10px;
+    right: 14px;
+    font-size: 11px;
+    font-family: 'Consolas', monospace;
+    color: rgba(133, 133, 133, 0.5);
+    opacity: 0;
+    transition: opacity 0.4s;
+    pointer-events: none;
+    z-index: 70;
+}
+
+.immersive-hint.visible {
+    opacity: 1;
+}
+
+/* 沉浸模式右下角调整手柄：拖动调整窗口大小 */
+.resize-handle {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    width: 18px;
+    height: 18px;
+    cursor: nwse-resize;
+    z-index: 80;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.2s;
+    background: linear-gradient(
+        135deg,
+        transparent 0 45%,
+        rgba(133, 133, 133, 0.4) 45% 52%,
+        transparent 52% 62%,
+        rgba(133, 133, 133, 0.4) 62% 69%,
+        transparent 69% 79%,
+        rgba(133, 133, 133, 0.4) 79% 86%,
+        transparent 86%
+    );
+}
+
+body.immersive .resize-handle {
+    opacity: 1;
+    visibility: visible;
+}
+
+/* 快捷键下拉框 */
+.setting-select {
+    width: 100%;
+    padding: 5px 8px;
+    font-size: 12px;
+    font-family: 'Consolas', monospace;
+    color: #cccccc;
+    background: #3e3e3e;
+    border: 1px solid #4e4e4e;
+    border-radius: 3px;
+    cursor: pointer;
+    outline: none;
+}
+
+.setting-select:hover {
+    border-color: #5e5e5e;
+}
+
+.setting-select option {
+    background: #2d2d2d;
+    color: #cccccc;
+}
+
 /* 开关样式 */
 .switch {
     position: relative;

@@ -16,7 +16,7 @@
   },
   "build": {
     "appId": "com.moyu.reader",
-    "productName": "摸鱼阅读器",
+    "productName": "slacking",
     "directories": {
       "output": "dist"
     },

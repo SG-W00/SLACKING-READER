@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>摸鱼阅读器</title>
+    <title>main.ts - slacking - Visual Studio Code</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -55,6 +55,8 @@
                 <div class="next-hint" id="nextHint">&#9662; scroll for next</div>
                 <!-- 全书进度条（视口底部细线） -->
                 <div class="global-progress"><div class="global-progress-fill" id="globalProgressFill"></div></div>
+                <!-- 沉浸模式进入提示 -->
+                <div class="immersive-hint" id="immersiveHint">press H to restore</div>
             </div>
         </div>
     </div>
@@ -119,7 +121,24 @@
                     </label>
                 </div>
                 <div class="setting-item">
-                    <label style="color: #6e7681; font-size: 11px;">Boss: right-click / Alt+Q &nbsp;|&nbsp; Next/Prev: Alt+Shift+&rarr;/&larr;</label>
+                    <label>Boss Key (hide/show)</label>
+                    <select id="bossHotkeySelect" class="setting-select">
+                        <option value="Alt+Q">Alt+Q</option>
+                        <option value="Ctrl+Q">Ctrl+Q</option>
+                        <option value="Alt+B">Alt+B</option>
+                        <option value="Ctrl+Shift+Q">Ctrl+Shift+Q</option>
+                    </select>
+                </div>
+                <div class="setting-item">
+                    <label>Chapter Nav Keys</label>
+                    <select id="chapterHotkeySelect" class="setting-select">
+                        <option value="AltShift">Alt+Shift+&larr;/&rarr;</option>
+                        <option value="CtrlShift">Ctrl+Shift+&larr;/&rarr;</option>
+                        <option value="CtrlAlt">Ctrl+Alt+&larr;/&rarr;</option>
+                    </select>
+                </div>
+                <div class="setting-item">
+                    <label style="color: #6e7681; font-size: 11px;">Disguise: right-click &nbsp;|&nbsp; Hide: Boss Key &nbsp;|&nbsp; Immersive: H</label>
                 </div>
             </div>
             
@@ -130,6 +149,9 @@
     </div>
     
     <input type="file" id="fileInput" accept=".txt" style="display: none;">
+
+    <!-- 沉浸模式右下角窗口调整手柄 -->
+    <div class="resize-handle" id="resizeHandle" title="resize"></div>
     
     <script src="app.js"></script>
 </body>

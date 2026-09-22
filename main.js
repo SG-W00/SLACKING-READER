@@ -1,5 +1,5 @@
 // Electron 主进程文件
-const { app, BrowserWindow, ipcMain, screen, globalShortcut } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, globalShortcut, Tray, Menu, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -19,11 +19,13 @@ function createWindow() {
         width: savedWindowState.width || 600,
         height: savedWindowState.height || 800,
         minWidth: 300,
-        minHeight: 200,
+        minHeight: 100,
         x: savedWindowState.x || (width - 650),
         y: savedWindowState.y || 100,
         frame: false, // 无边框窗口
-        transparent: false, // 背景透明
+        // 创建时启用透明：H 键无边框模式依赖窗口级透明（Windows 上运行时无法补开）
+        transparent: true,
+        backgroundColor: '#00000000',
         alwaysOnTop: true, // 始终置顶
         resizable: true, // 可调整大小
         maximizable: false, // 不可最大化
@@ -35,12 +37,16 @@ function createWindow() {
             enableRemoteModule: true
         },
         backgroundColor: '#f5f5f5',
-        title: '摸鱼阅读器'
+        // 标题伪装：任务栏 / Alt+Tab 显示 IDE 风格标题，不暴露阅读器身份
+        title: 'main.ts - slacking - Visual Studio Code'
     };
 
     mainWindow = new BrowserWindow(windowConfig);
 
     mainWindow.loadFile('index.html');
+
+    // 禁止页面 <title> 覆盖伪装标题
+    mainWindow.on('page-title-updated', (e) => e.preventDefault());
 
     // 开发时打开开发者工具
     // mainWindow.webContents.openDevTools();
@@ -352,29 +358,102 @@ app.whenReady().then(() => {
     });
 });
 
-// 全局快捷键：
-//   Alt+Q          老板键（切换伪装态），失败自动尝试备选键位
-//   Alt+Shift+←/→  全局翻章（避开 IDEA 的 Alt+←/→ 导航键）
-function registerGlobalShortcuts() {
-    const bossKeys = ['Alt+Q', 'Alt+B'];
-    for (const key of bossKeys) {
-        if (globalShortcut.register(key, () => {
-            if (mainWindow) mainWindow.webContents.send('boss-key');
-        })) {
-            break;
+// ==================== 托盘瞬间隐藏（老板键二级） ====================
+// Boss Key 按下：整个窗口消失（任务栏同步消失），托盘出现低调图标；
+// 再按 Boss Key 或点击托盘图标恢复，恢复前由渲染进程自动保存阅读进度
+let tray = null;
+let hiddenToTray = false;
+
+// 程序化生成 16x16 灰色方块图标（低调不引人注意）
+function createTrayIcon() {
+    const size = 16;
+    const buf = Buffer.alloc(size * size * 4); // BGRA
+    for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+            const i = (y * size + x) * 4;
+            const border = x === 1 || y === 1 || x === size - 2 || y === size - 2;
+            const v = border ? 0x5e : 0x40;
+            buf[i] = v; buf[i + 1] = v; buf[i + 2] = v; buf[i + 3] = 255;
         }
     }
-    globalShortcut.register('Alt+Shift+Left', () => {
-        if (mainWindow) mainWindow.webContents.send('global-prev-chapter');
-    });
-    globalShortcut.register('Alt+Shift+Right', () => {
-        if (mainWindow) mainWindow.webContents.send('global-next-chapter');
-    });
+    return nativeImage.createFromBitmap(buf, { width: size, height: size });
 }
 
-// 应用退出前注销所有全局快捷键，避免残留系统级拦截
+function hideToTray() {
+    if (!mainWindow || hiddenToTray) return;
+    hiddenToTray = true;
+    // 通知渲染进程保存阅读进度
+    mainWindow.webContents.send('window-hide');
+    mainWindow.hide();
+    if (!tray) {
+        tray = new Tray(createTrayIcon());
+        tray.setToolTip('slacking');
+        tray.setContextMenu(Menu.buildFromTemplate([
+            { label: 'Show', click: showFromTray },
+            { label: 'Quit', click: () => app.quit() }
+        ]));
+        tray.on('click', showFromTray);
+    }
+}
+
+function showFromTray() {
+    if (!mainWindow) return;
+    hiddenToTray = false;
+    mainWindow.show();
+    mainWindow.focus();
+}
+
+function handleBossKey() {
+    if (hiddenToTray) {
+        showFromTray();
+    } else {
+        hideToTray();
+    }
+}
+
+// ==================== 全局快捷键（支持自定义） ====================
+// boss: 隐藏/显示窗口（一级内容伪装由窗口内右键触发）
+// prev/next: 全局翻章（默认避开 IDEA 的 Alt+←/→ 导航键）
+let currentShortcuts = { boss: 'Alt+Q', prev: 'Alt+Shift+Left', next: 'Alt+Shift+Right' };
+
+function registerShortcuts(cfg) {
+    globalShortcut.unregisterAll();
+    currentShortcuts = cfg;
+    const registered = [];
+    const reg = (accel, fn) => {
+        if (globalShortcut.register(accel, fn)) registered.push(accel);
+    };
+    reg(cfg.boss, handleBossKey);
+    reg(cfg.prev, () => {
+        if (mainWindow) mainWindow.webContents.send('global-prev-chapter');
+    });
+    reg(cfg.next, () => {
+        if (mainWindow) mainWindow.webContents.send('global-next-chapter');
+    });
+    return registered;
+}
+
+function registerGlobalShortcuts() {
+    registerShortcuts(currentShortcuts);
+}
+
+// 渲染进程按用户设置重新注册，返回注册成功的键位
+ipcMain.handle('shortcuts:register', (event, cfg) => {
+    if (!cfg || typeof cfg !== 'object') return [];
+    return registerShortcuts({
+        boss: String(cfg.boss || 'Alt+Q'),
+        prev: String(cfg.prev || 'Alt+Shift+Left'),
+        next: String(cfg.next || 'Alt+Shift+Right')
+    });
+});
+
+// 应用退出前注销所有全局快捷键并清理托盘，避免残留系统级拦截
 app.on('will-quit', () => {
     globalShortcut.unregisterAll();
+    if (tray) {
+        tray.destroy();
+        tray = null;
+    }
 });
 
 // 所有窗口关闭时退出应用（macOS除外）

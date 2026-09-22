@@ -29,7 +29,9 @@ let settings = {
     windowOpacity: 100,
     contentOpacity: 95,
     transparentMode: false,
-    stealthNames: true
+    stealthNames: true,
+    bossHotkey: 'Alt+Q',        // 二级隐藏（托盘）快捷键
+    chapterHotkeys: 'AltShift'  // 全局翻章键位组合
 };
 
 // 书架和阅读进度
@@ -87,6 +89,25 @@ const backToShelfBtn = getEl('backToShelfBtn');
 const nextHint = getEl('nextHint');                 // 到底二次滚动翻章提示
 const globalProgressFill = getEl('globalProgressFill'); // 全书进度条
 const stealthNamesInput = getEl('stealthNames');    // 章节名伪装开关
+const bossHotkeySelect = getEl('bossHotkeySelect');     // Boss Key 自定义
+const chapterHotkeySelect = getEl('chapterHotkeySelect'); // 翻章键位自定义
+
+// 翻章键位组合映射
+const CHAPTER_HOTKEY_MAP = {
+    AltShift: ['Alt+Shift+Left', 'Alt+Shift+Right'],
+    CtrlShift: ['Ctrl+Shift+Left', 'Ctrl+Shift+Right'],
+    CtrlAlt: ['Ctrl+Alt+Left', 'Ctrl+Alt+Right']
+};
+
+// 按当前设置向主进程注册全局快捷键，返回注册成功的键位
+function registerShortcutsFromSettings() {
+    const [prev, next] = CHAPTER_HOTKEY_MAP[settings.chapterHotkeys] || CHAPTER_HOTKEY_MAP.AltShift;
+    return ipcRenderer.invoke('shortcuts:register', {
+        boss: settings.bossHotkey || 'Alt+Q',
+        prev,
+        next
+    });
+}
 
 // 初始化
 function init() {
@@ -98,6 +119,8 @@ function init() {
     applySettings();
     bindEvents();
     updatePinButton();
+    // 按用户设置注册全局快捷键（Boss Key / 全局翻章）
+    registerShortcutsFromSettings();
 
     // 初始化时隐藏章节选择器和阅读导航按钮
     if (chapterSelect) {
@@ -356,6 +379,11 @@ function bindEvents() {
             nextChapterBtn.click();
         } else if (e.key === 'Escape') {
             settingsPanel.classList.remove('active');
+        } else if ((e.key === 'h' || e.key === 'H') && !e.ctrlKey && !e.altKey && !e.metaKey) {
+            // 沉浸/无边框三态循环：下拉/输入控件聚焦时不触发，避免交互冲突
+            const tag = ((e.target && e.target.tagName) || '').toLowerCase();
+            if (tag === 'select' || tag === 'input' || tag === 'textarea') return;
+            cycleImmersive();
         }
     });
 
@@ -409,6 +437,46 @@ function bindEvents() {
     ipcRenderer.on('window-focus', () => {
         document.body.classList.remove('unfocused');
     });
+
+    // 隐藏到托盘前保存阅读进度
+    ipcRenderer.on('window-hide', () => {
+        saveReadingProgress();
+    });
+
+    // 沉浸模式右下角手柄：拖动调整窗口大小
+    const resizeHandle = getEl('resizeHandle');
+    if (resizeHandle) {
+        resizeHandle.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            ipcRenderer.send('window-resize-start');
+            const onMove = () => ipcRenderer.send('window-resize-move');
+            const onUp = () => {
+                ipcRenderer.send('window-resize-end');
+                window.removeEventListener('mousemove', onMove);
+                window.removeEventListener('mouseup', onUp);
+            };
+            window.addEventListener('mousemove', onMove);
+            window.addEventListener('mouseup', onUp);
+        });
+        // 拖动中失焦（鼠标划出窗口）时结束本次调整，防状态残留
+        window.addEventListener('blur', () => ipcRenderer.send('window-resize-end'));
+    }
+
+    // 快捷键自定义
+    const bindHotkeySelect = (select, key) => {
+        if (!select) return;
+        select.addEventListener('change', async (e) => {
+            settings[key] = e.target.value;
+            saveSettings();
+            const registered = await registerShortcutsFromSettings();
+            if (!registered || registered.length === 0) {
+                alert('快捷键注册失败，可能与其他程序冲突，请换一个键位。');
+            }
+        });
+    };
+    bindHotkeySelect(bossHotkeySelect, 'bossHotkey');
+    bindHotkeySelect(chapterHotkeySelect, 'chapterHotkeys');
 
     // 自动导入小说监听（只接收元数据，正文由主进程按需提供）
     ipcRenderer.on('auto-import-novels', (event, novels) => {
@@ -937,6 +1005,28 @@ async function renderChapter() {
     saveReadingProgress();
 }
 
+// ==================== 沉浸模式 ====================
+// H 键三态循环：normal（正常）→ immersive（隐藏导航，可拖动/调整）→ borderless（无边框透明融入 IDE）→ normal
+let immersiveState = 0;
+let immersiveHintTimer = null;
+
+function cycleImmersive() {
+    immersiveState = (immersiveState + 1) % 3;
+    document.body.classList.toggle('immersive', immersiveState >= 1);
+    document.body.classList.toggle('borderless', immersiveState === 2);
+
+    // 切换后右上角短暂提示当前状态/下一步操作，2 秒后淡出
+    const hint = getEl('immersiveHint');
+    if (hint) {
+        hint.textContent = immersiveState === 0
+            ? 'immersive off'
+            : (immersiveState === 1 ? 'press H: borderless' : 'press H: exit immersive');
+        hint.classList.add('visible');
+        if (immersiveHintTimer) clearTimeout(immersiveHintTimer);
+        immersiveHintTimer = setTimeout(() => hint.classList.remove('visible'), 2000);
+    }
+}
+
 // ==================== 老板键伪装 ====================
 // 生成一段以假乱真的前端构建日志
 function buildFakeLogLines() {
@@ -1132,6 +1222,8 @@ function loadSettings() {
             contentOpacityInput.value = settings.contentOpacity;
             document.getElementById('contentOpacityValue').textContent = settings.contentOpacity + '%';
             if (stealthNamesInput) stealthNamesInput.checked = settings.stealthNames !== false;
+            if (bossHotkeySelect) bossHotkeySelect.value = settings.bossHotkey || 'Alt+Q';
+            if (chapterHotkeySelect) chapterHotkeySelect.value = settings.chapterHotkeys || 'AltShift';
 
             // 应用窗口设置
             ipcRenderer.send('window-set-opacity', settings.windowOpacity / 100);
