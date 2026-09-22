@@ -1006,21 +1006,18 @@ async function renderChapter() {
 }
 
 // ==================== 沉浸模式 ====================
-// H 键三态循环：normal（正常）→ immersive（隐藏导航，可拖动/调整）→ borderless（无边框透明融入 IDE）→ normal
+// H 键两态切换：normal（正常）↔ immersive（隐藏标题栏+工具栏，正文撑满全窗）
 let immersiveState = 0;
 let immersiveHintTimer = null;
 
 function cycleImmersive() {
-    immersiveState = (immersiveState + 1) % 3;
-    document.body.classList.toggle('immersive', immersiveState >= 1);
-    document.body.classList.toggle('borderless', immersiveState === 2);
+    immersiveState = (immersiveState + 1) % 2;
+    document.body.classList.toggle('immersive', immersiveState === 1);
 
-    // 切换后右上角短暂提示当前状态/下一步操作，2 秒后淡出
+    // 切换后右上角短暂提示当前状态，2 秒后淡出
     const hint = getEl('immersiveHint');
     if (hint) {
-        hint.textContent = immersiveState === 0
-            ? 'immersive off'
-            : (immersiveState === 1 ? 'press H: borderless' : 'press H: exit immersive');
+        hint.textContent = immersiveState === 1 ? 'immersive on' : 'immersive off';
         hint.classList.add('visible');
         if (immersiveHintTimer) clearTimeout(immersiveHintTimer);
         immersiveHintTimer = setTimeout(() => hint.classList.remove('visible'), 2000);

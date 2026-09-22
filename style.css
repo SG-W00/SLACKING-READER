@@ -635,17 +635,6 @@ body.immersive::before {
     z-index: 90;
 }
 
-/* 无边框模式：窗口背景全透明，只留正文文字，融入 IDE */
-body.borderless {
-    background: transparent;
-}
-
-body.borderless .main-content {
-    background: transparent !important;
-    backdrop-filter: none !important;
-    background-image: none !important;
-}
-
 /* 沉浸模式进入提示：右上角短暂显示后淡出 */
 .immersive-hint {
     position: fixed;

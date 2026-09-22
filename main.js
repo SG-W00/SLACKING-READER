@@ -23,7 +23,9 @@ function createWindow() {
         x: savedWindowState.x || (width - 650),
         y: savedWindowState.y || 100,
         frame: false, // 无边框窗口
-        // 创建时启用透明：H 键无边框模式依赖窗口级透明（Windows 上运行时无法补开）
+        hasShadow: false, // 关闭系统投影
+        // 窗口级透明：沉浸模式背景 rgba(...,0.95) 依赖它产生边缘融合效果，
+        // 且透明窗口无系统边框线/圆角/阴影。白屏只发生在已移除的 borderless 态（body 全透明时）
         transparent: true,
         backgroundColor: '#00000000',
         alwaysOnTop: true, // 始终置顶
